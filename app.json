@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "project",
-    "slug": "project",
+    "name": "Jumble Sale",
+    "slug": "jumble-sale",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "project",
+    "scheme": "jumble-sale",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
@@ -32,6 +32,14 @@
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        }
+      ],
+      "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you upload product images for promotions.",
+          "cameraPermission": "The app accesses your camera to let you take product photos for promotions."
         }
       ]
     ],

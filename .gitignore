@@ -30,7 +30,8 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# env — never commit secrets (anon key in .env is ok locally; use .env.example for docs)
+.env
 .env*.local
 
 # typescript

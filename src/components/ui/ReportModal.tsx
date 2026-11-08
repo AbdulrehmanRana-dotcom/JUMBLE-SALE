@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { interactionLogger } from '@/lib/interactionLogger';
+import { createNotification } from '@/lib/notificationStore';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { colors, radii, spacing, typography } from '@/theme';
@@ -45,6 +46,29 @@ export function ReportModal({ visible, dealId, onClose }: ReportModalProps) {
         toast.show(error.message, 'error');
       } else {
         interactionLogger.logInteraction(dealId, 'report', user?.id);
+
+        // Genuine notification for Admin and Consumer
+        await createNotification({
+          role: 'admin',
+          userId: 'admin',
+          dealId,
+          category: 'report',
+          title: 'Deal Reported ⚠️',
+          body: `Shopper reported deal issue: "${selectedReason}". Review required.`,
+          action_url: 'reports',
+        });
+
+        if (user?.id) {
+          await createNotification({
+            role: 'consumer',
+            userId: user.id,
+            dealId,
+            category: 'system',
+            title: 'Report Received 🛡️',
+            body: `Aapki report (${selectedReason}) submit ho gayi hai. Admin team deal ka jaiza le rahi hai.`,
+          });
+        }
+
         toast.show('Thank you! Report submitted for admin review.', 'success');
         onClose();
       }

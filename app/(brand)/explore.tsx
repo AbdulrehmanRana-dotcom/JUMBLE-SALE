@@ -21,6 +21,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { getTopEngagedBrands, type EngagedBrand } from '@/lib/brandStore';
 import { getLocalBrandDeals } from '@/lib/dealStore';
 import { supabase } from '@/lib/supabase';
+import { onBrandExploreTabReset } from '@/lib/tabEvents';
 import { spacing, typography } from '@/theme';
 import type { Deal } from '@/types/database.types';
 
@@ -28,6 +29,15 @@ export default function BrandExploreScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string | null>(null);
+
+  // Instagram-style: Tapping Explore in bottom nav clears filters and query
+  React.useEffect(() => {
+    const unsubscribe = onBrandExploreTabReset(() => {
+      setSearchQuery('');
+      setSelectedBrandFilter(null);
+    });
+    return unsubscribe;
+  }, []);
 
   // Fetch real brands ranked by engagement for Top Brands bar
   const { data: topBrands = [] } = useQuery<EngagedBrand[]>({

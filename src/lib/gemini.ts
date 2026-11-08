@@ -436,31 +436,28 @@ export async function fetchPersonalizedRecommendations(
   }
 
   try {
-    // 1. Fetch user's liked deals from Supabase
-    const { data: likedRows } = await (supabase.from('likes') as any)
-      .select('deal_id, deals(category_id, brand_id)')
-      .eq('user_id', userId);
+    // 1. Fetch user's liked and saved deals instantly
+    const { getLikedDealIds, getSavedDealIds } = await import('@/lib/activityStore');
+    const [likedIds, savedIds] = await Promise.all([
+      getLikedDealIds(userId),
+      getSavedDealIds(userId),
+    ]);
 
-    // 2. Fetch user's saved deals from Supabase
-    const { data: savedRows } = await (supabase.from('saved_deals') as any)
-      .select('deal_id, deals(category_id, brand_id)')
-      .eq('user_id', userId);
+    const likedSet = new Set(likedIds);
+    const savedSet = new Set(savedIds);
 
     const categoryAffinity: Record<string, number> = {};
     const brandAffinity: Record<string, number> = {};
 
-    const processItem = (item: any, weight: number) => {
-      const catId = item?.deals?.category_id || item?.category_id;
-      const bId = item?.deals?.brand_id || item?.brand_id;
-      if (catId) categoryAffinity[catId] = (categoryAffinity[catId] || 0) + weight;
-      if (bId) brandAffinity[bId] = (brandAffinity[bId] || 0) + weight;
-    };
-
-    if (Array.isArray(likedRows)) {
-      likedRows.forEach((r) => processItem(r, 10));
-    }
-    if (Array.isArray(savedRows)) {
-      savedRows.forEach((r) => processItem(r, 15));
+    for (const d of allDeals) {
+      if (likedSet.has(d.id)) {
+        if (d.category_id) categoryAffinity[d.category_id] = (categoryAffinity[d.category_id] || 0) + 10;
+        if (d.brand_id) brandAffinity[d.brand_id] = (brandAffinity[d.brand_id] || 0) + 10;
+      }
+      if (savedSet.has(d.id)) {
+        if (d.category_id) categoryAffinity[d.category_id] = (categoryAffinity[d.category_id] || 0) + 15;
+        if (d.brand_id) brandAffinity[d.brand_id] = (brandAffinity[d.brand_id] || 0) + 15;
+      }
     }
 
     // 3. Re-score deals with personalization boost

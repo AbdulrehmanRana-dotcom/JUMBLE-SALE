@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '@/lib/supabase';
+import { interactionLogger } from '@/lib/interactionLogger';
+import { createNotification } from '@/lib/notificationStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import type { Deal } from '@/types/database.types';
 
 export interface CommentItem {
   id: string;
@@ -74,22 +77,31 @@ export function sanitizeReviewerName(rawName?: string | null): string {
 // ─── COMMENTS ────────────────────────────────────────────────────────
 export async function getDealComments(dealId: string): Promise<CommentItem[]> {
   try {
-    // 1. Fetch from Supabase comments table
-    const { data, error } = await (supabase.from('comments') as any)
-      .select('*')
-      .eq('deal_id', dealId)
-      .order('created_at', { ascending: false });
-
     let rawList: any[] = [];
-    if (!error && Array.isArray(data) && data.length > 0) {
-      rawList = data;
-    } else {
+
+    // 1. Fetch from Supabase comments table only if live backend configured
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await (supabase.from('comments') as any)
+          .select('*')
+          .eq('deal_id', dealId)
+          .order('created_at', { ascending: false });
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          rawList = data;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (rawList.length === 0) {
       // 2. Local AsyncStorage fallback (offline safety)
       const raw = await AsyncStorage.getItem(COMMENTS_STORAGE_KEY);
       if (raw) {
         const all: CommentItem[] = JSON.parse(raw);
         rawList = Array.isArray(all)
-          ? all.filter((c) => !['comm-1', 'comm-2', 'comm-3'].includes(c.id))
+          ? all.filter((c) => !['comm-1', 'comm-2', 'comm-3'].includes(c.id) && c.deal_id === dealId)
           : [];
       }
     }
@@ -100,7 +112,7 @@ export async function getDealComments(dealId: string): Promise<CommentItem[]> {
       const storedName = await AsyncStorage.getItem('@user_display_name');
       if (storedName && storedName.trim() && storedName.trim().toLowerCase() !== 'shopper') {
         fallbackUserName = sanitizeReviewerName(storedName.trim());
-      } else {
+      } else if (isSupabaseConfigured) {
         const { data: authData } = await supabase.auth.getUser();
         const u = authData?.user;
         if (u) {
@@ -220,6 +232,26 @@ export async function addDealComment(
       details: text.trim(),
       created_at: newComm.created_at,
     });
+
+    // Authentic Notification to Brand for real review/comment (Smart Rollup)
+    if (brandId) {
+      try {
+        await createNotification({
+          role: 'brand',
+          userId: brandId,
+          brandId,
+          dealId,
+          category: 'deal',
+          title: `New Review on "${dealTitle}" 💬`,
+          body: `${safeUserName}: "${text.trim().substring(0, 60)}"`,
+          action_url: '/(brand)/posts',
+          aggregation_key: `comment_deal_${dealId}`,
+          actor_name: safeUserName,
+        });
+      } catch (err) {
+        console.warn('[ActivityStore] Comment notification notice:', err);
+      }
+    }
   } catch (err) {
     console.error('[ActivityStore] Error saving comment:', err);
   }
@@ -253,7 +285,7 @@ export async function getLikedDealIds(userId?: string | null): Promise<string[]>
     }
   }
 
-  if (isUUID) {
+  if (isUUID && isSupabaseConfigured) {
     try {
       const { data, error } = await (supabase.from('likes') as any)
         .select('deal_id')
@@ -338,6 +370,26 @@ export async function toggleDealLike(
         user_name: userName,
         created_at: new Date().toISOString(),
       });
+
+      // Authentic Notification to Brand for real like (Smart Rollup)
+      if (brandId) {
+        try {
+          await createNotification({
+            role: 'brand',
+            userId: brandId,
+            brandId,
+            dealId,
+            category: 'deal',
+            title: 'New Like on Your Promotion! ❤️',
+            body: `${userName || 'A shopper'} ne aapki promotion "${dealTitle}" ko like kiya hai.`,
+            action_url: '/(brand)/posts',
+            aggregation_key: `like_deal_${dealId}`,
+            actor_name: userName || 'A shopper',
+          });
+        } catch (err) {
+          console.warn('[ActivityStore] Like notification notice:', err);
+        }
+      }
     }
 
     await AsyncStorage.setItem(userKey, JSON.stringify(updated));
@@ -351,6 +403,11 @@ export async function toggleDealLike(
 }
 
 // ─── SAVED DEALS ─────────────────────────────────────────────────────
+export const DEFAULT_USER_SAVED_DEALS: Record<string, string[]> = {
+  'usr-c2-ahmed': ['d1111111-1111-1111-1111-222222222222'], // Buy 1 Get 1 Free Ready-to-Wear Kurtis
+  'usr-c1-zara': ['d1111111-1111-1111-1111-111111111111'], // Flat 50% Off Summer Lawn Sale
+};
+
 export async function getSavedDealIds(userId?: string | null): Promise<string[]> {
   const safeUserId = userId || 'guest';
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(safeUserId);
@@ -359,8 +416,16 @@ export async function getSavedDealIds(userId?: string | null): Promise<string[]>
   try {
     const raw = await AsyncStorage.getItem(`${SAVED_STORAGE_KEY}_${safeUserId}`);
     localSaved = raw ? JSON.parse(raw) : [];
+    if (DEFAULT_USER_SAVED_DEALS[safeUserId]) {
+      const seeds = DEFAULT_USER_SAVED_DEALS[safeUserId];
+      const merged = Array.from(new Set([...seeds, ...localSaved]));
+      if (merged.length !== localSaved.length) {
+        localSaved = merged;
+        AsyncStorage.setItem(`${SAVED_STORAGE_KEY}_${safeUserId}`, JSON.stringify(merged)).catch(() => {});
+      }
+    }
   } catch {
-    localSaved = [];
+    localSaved = DEFAULT_USER_SAVED_DEALS[safeUserId] || [];
   }
 
   if (safeUserId !== 'guest') {
@@ -369,13 +434,16 @@ export async function getSavedDealIds(userId?: string | null): Promise<string[]>
       const guestSaved: string[] = guestRaw ? JSON.parse(guestRaw) : [];
       if (guestSaved.length > 0) {
         localSaved = Array.from(new Set([...localSaved, ...guestSaved]));
+        // Migrate guest items into user account & clear guest cache
+        await AsyncStorage.setItem(`${SAVED_STORAGE_KEY}_${safeUserId}`, JSON.stringify(localSaved));
+        await AsyncStorage.removeItem(`${SAVED_STORAGE_KEY}_guest`);
       }
     } catch {
       // ignore
     }
   }
 
-  if (isUUID) {
+  if (isUUID && isSupabaseConfigured) {
     try {
       const { data, error } = await (supabase.from('saved_deals') as any)
         .select('deal_id')
@@ -415,6 +483,17 @@ export async function toggleDealSave(
       updated = saved.filter((id) => id !== dealId);
       isNowSaved = false;
 
+      // Also clean from guest if logged in
+      if (safeUserId !== 'guest') {
+        try {
+          const guestRaw = await AsyncStorage.getItem(`${SAVED_STORAGE_KEY}_guest`);
+          if (guestRaw) {
+            const guestArr = JSON.parse(guestRaw).filter((id: string) => id !== dealId);
+            await AsyncStorage.setItem(`${SAVED_STORAGE_KEY}_guest`, JSON.stringify(guestArr));
+          }
+        } catch {}
+      }
+
       if (isUserUUID && isDealUUID) {
         try {
           await (supabase.from('saved_deals') as any)
@@ -426,7 +505,7 @@ export async function toggleDealSave(
         }
       }
     } else {
-      updated = [...saved, dealId];
+      updated = Array.from(new Set([...saved, dealId]));
       isNowSaved = true;
 
       if (isUserUUID && isDealUUID) {
@@ -453,11 +532,78 @@ export async function toggleDealSave(
   }
 }
 
+export async function getSavedDealsList(userId?: string | null): Promise<Deal[]> {
+  try {
+    const savedIds = await getSavedDealIds(userId);
+    if (!savedIds || savedIds.length === 0) {
+      return [];
+    }
+
+    const { getLocalBrandDeals } = await import('@/lib/dealStore');
+    const localDeals = await getLocalBrandDeals();
+    const { getLocalBrands } = await import('@/lib/brandStore');
+    const localBrands = await getLocalBrands();
+
+    let remoteDeals: Deal[] = [];
+    if (isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('deals')
+          .select('*, brand:brands(*), category:categories(*)')
+          .in('id', savedIds);
+
+        if (!error && Array.isArray(data)) {
+          remoteDeals = data as Deal[];
+        }
+      } catch (err) {
+        console.warn('[ActivityStore] Remote saved deals fetch notice:', err);
+      }
+    }
+
+    const dealsMap = new Map<string, Deal>();
+
+    // Add local matches first
+    for (const d of localDeals) {
+      if (savedIds.includes(d.id)) {
+        const brandMatch =
+          (d as any).brand ||
+          localBrands.find((b) => b.id === d.brand_id) ||
+          localBrands[0] || {
+            id: d.brand_id,
+            name: (d as any).brand_name || 'Khaadi',
+            category: 'Fashion & Apparel',
+            logo_url: 'https://images.unsplash.com/photo-1544441893-675973e31985',
+          };
+        dealsMap.set(d.id, { ...d, brand: brandMatch });
+      }
+    }
+
+    // Add remote matches (overwriting or supplementing)
+    for (const rd of remoteDeals) {
+      dealsMap.set(rd.id, rd);
+    }
+
+    // Return in order of savedIds (most recent first)
+    const result: Deal[] = [];
+    for (const id of savedIds) {
+      const match = dealsMap.get(id);
+      if (match) {
+        result.push(match);
+      }
+    }
+
+    return result;
+  } catch (err) {
+    console.error('[ActivityStore] getSavedDealsList error:', err);
+    return [];
+  }
+}
+
 export async function getDealLikesCount(dealId: string): Promise<number> {
   const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
   let baseCount = 0;
 
-  if (isDealUUID) {
+  if (isDealUUID && isSupabaseConfigured) {
     try {
       const { count, error } = await (supabase.from('likes') as any)
         .select('*', { count: 'exact', head: true })
@@ -558,6 +704,10 @@ export async function recordDealShare(
       created_at: new Date().toISOString(),
     });
 
+    if (dealId) {
+      interactionLogger.logInteraction(dealId, 'share', userId);
+    }
+
     return count;
   } catch {
     return 1;
@@ -606,6 +756,10 @@ export async function getAllActivities(): Promise<ActivityEvent[]> {
     }
   } catch {
     // ignore
+  }
+
+  if (!isSupabaseConfigured) {
+    return merged;
   }
 
   // 2. Query Live Supabase Comments Table
@@ -779,7 +933,7 @@ export async function recordDealView(deal: {
       original_price: deal.original_price,
       discount_pct: deal.discount_pct,
       image_url: deal.image_url || deal.image_urls?.[0] || null,
-      brand_name: deal.brand?.name || deal.brand_name || 'Featured Brand',
+      brand_name: deal.brand?.name || deal.brand_name || 'Khaadi',
       brand_logo: deal.brand?.logo_url || deal.brand_logo || null,
       viewed_at: new Date().toISOString(),
     };
@@ -809,5 +963,25 @@ export async function getRecentlyViewedDeals(): Promise<RecentlyViewedDeal[]> {
     return [];
   } catch {
     return [];
+  }
+}
+
+export async function clearRecentlyViewedDeals(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(RECENT_VIEWED_KEY);
+  } catch (err) {
+    console.warn('[ActivityStore] Error clearing viewed deals:', err);
+  }
+}
+
+export async function deleteRecentlyViewedDeal(dealId: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(RECENT_VIEWED_KEY);
+    if (!raw) return;
+    const existing: RecentlyViewedDeal[] = JSON.parse(raw);
+    const filtered = existing.filter((d) => d.id !== dealId);
+    await AsyncStorage.setItem(RECENT_VIEWED_KEY, JSON.stringify(filtered));
+  } catch (err) {
+    console.warn('[ActivityStore] Error deleting viewed deal:', err);
   }
 }

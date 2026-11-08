@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleProp,
   StyleSheet,
@@ -42,7 +43,9 @@ export function BrandAnalyticsDashboard({
     queryKey: ['brand-live-analytics', brandId, brandName],
     queryFn: () => fetchBrandLiveAnalytics(brandId, brandName),
     enabled: Boolean(brandId || brandName),
-    refetchInterval: 15000,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const metrics = analytics?.metrics || {
@@ -52,6 +55,8 @@ export function BrandAnalyticsDashboard({
     totalComments: 0,
     totalClicks: 0,
     ctr: '0.0%',
+    totalAttributedOrders: 0,
+    totalSalesRevenue: 0,
   };
 
   const days: DailyActivityPoint[] = analytics?.last7Days || [];
@@ -182,6 +187,26 @@ export function BrandAnalyticsDashboard({
           </View>
           <Text style={styles.kpiSubWide}>Direct brand item buy link visits</Text>
         </View>
+
+        {/* Metric 6: Attributed Orders */}
+        <View style={styles.kpiCard}>
+          <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(0, 255, 102, 0.12)' }]}>
+            <Ionicons name="bag-check" size={18} color="#00FF66" />
+          </View>
+          <Text style={styles.kpiVal}>{(metrics.totalAttributedOrders || 0).toLocaleString()}</Text>
+          <Text style={styles.kpiLabel}>ATTRIBUTED ORDERS</Text>
+          <Text style={styles.kpiSub}>Purchases completed</Text>
+        </View>
+
+        {/* Metric 7: Total Sales Revenue */}
+        <View style={styles.kpiCard}>
+          <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.12)' }]}>
+            <Ionicons name="cash" size={18} color="#38BDF8" />
+          </View>
+          <Text style={styles.kpiVal}>Rs. {(metrics.totalSalesRevenue || 0).toLocaleString()}</Text>
+          <Text style={styles.kpiLabel}>SALES REVENUE</Text>
+          <Text style={styles.kpiSub}>GMV via Jumble Sale</Text>
+        </View>
       </View>
 
       {/* ─── 3. 7-DAY REAL ACTIVITY GRAPH ─── */}
@@ -283,6 +308,63 @@ export function BrandAnalyticsDashboard({
           </Text>
         </View>
       </View>
+
+      {/* ─── 4. ATTRIBUTED ORDERS FROM JUMBLE SALE ─── */}
+      <View style={styles.ordersSectionCard}>
+        <View style={styles.chartHeader}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="bag-check" size={16} color="#00FF66" />
+            <Text style={styles.chartTitle}>
+              Shoppers From Jumble Sale ({analytics?.attributedOrders?.length || 0})
+            </Text>
+          </View>
+          <Text style={styles.chartTotalBadge}>
+            Rs. {(metrics.totalSalesRevenue || 0).toLocaleString()} Total Sales
+          </Text>
+        </View>
+
+        {(!analytics?.attributedOrders || analytics.attributedOrders.length === 0) ? (
+          <View style={styles.emptyOrdersBox}>
+            <Ionicons name="cart-outline" size={24} color="#64748B" />
+            <Text style={styles.emptyOrdersText}>
+              No confirmed purchases yet. When users shop by clicking your post links, their orders and revenue will appear here.
+            </Text>
+          </View>
+        ) : (
+          analytics.attributedOrders.map((ord) => (
+            <View key={ord.id} style={styles.brandOrderRow}>
+              <View style={styles.brandOrderLeft}>
+                <View style={styles.orderIconWrap}>
+                  <Ionicons name="person" size={14} color="#00FF66" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.orderCustomerName} numberOfLines={1}>
+                    {ord.user_name || 'Jumble Sale Shopper'}
+                  </Text>
+                  <Text style={styles.orderDealName} numberOfLines={1}>
+                    {ord.deal_title}
+                  </Text>
+                  <Text style={styles.orderTimeText}>
+                    {new Date(ord.created_at).toLocaleDateString('en-PK', {
+                      day: 'numeric',
+                      month: 'short',
+                    })} {ord.order_reference ? `• Ref #${ord.order_reference}` : ''}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.brandOrderRight}>
+                <Text style={styles.brandOrderAmount}>
+                  Rs. {Number(ord.order_amount).toLocaleString()}
+                </Text>
+                <View style={styles.verifiedAttributionPill}>
+                  <Text style={styles.verifiedAttributionText}>Confirmed</Text>
+                </View>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
     </View>
   );
 }
@@ -312,11 +394,16 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 4.5,
     backgroundColor: '#00FF66',
-    shadowColor: '#00FF66',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-    elevation: 3,
+    ...Platform.select({
+      web: { boxShadow: '0px 0px 6px #00FF66' },
+      default: {
+        shadowColor: '#00FF66',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 6,
+        elevation: 3,
+      },
+    }),
   },
   headerTitle: {
     ...typography.h3,
@@ -498,11 +585,16 @@ const styles = StyleSheet.create({
     minHeight: 5,
   },
   barFillToday: {
-    shadowColor: '#00FF66',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 5,
-    elevation: 2,
+    ...Platform.select({
+      web: { boxShadow: '0px 0px 5px rgba(0, 255, 102, 0.6)' },
+      default: {
+        shadowColor: '#00FF66',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 5,
+        elevation: 2,
+      },
+    }),
   },
   dayLabelText: {
     ...typography.caption,
@@ -536,5 +628,95 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#00FF66',
     fontWeight: '600',
+  },
+  ordersSectionCard: {
+    backgroundColor: '#141722',
+    borderRadius: 16,
+    padding: spacing[3],
+    borderWidth: 1,
+    borderColor: '#202432',
+    gap: 12,
+  },
+  emptyOrdersBox: {
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F121C',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1E2333',
+    gap: 8,
+  },
+  emptyOrdersText: {
+    ...typography.caption,
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 340,
+  },
+  brandOrderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0D1018',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1E2333',
+    gap: 12,
+  },
+  brandOrderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  orderIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderCustomerName: {
+    ...typography.body,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  orderDealName: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  orderTimeText: {
+    ...typography.caption,
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  brandOrderRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  brandOrderAmount: {
+    ...typography.body,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#00FF66',
+  },
+  verifiedAttributionPill: {
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  verifiedAttributionText: {
+    color: '#00FF66',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

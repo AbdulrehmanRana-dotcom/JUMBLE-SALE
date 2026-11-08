@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
+import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
@@ -29,16 +30,12 @@ export default function OnboardingCategoriesScreen() {
   const [saving, setSaving] = useState(false);
 
   // Fetch available categories
-  const { data: categories = [], isLoading } = useQuery<Category[]>({
+  const { data: categories = DEFAULT_CATEGORIES, isLoading } = useQuery<Category[]>({
     queryKey: ['categories'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data ?? [];
+      return getLocalCategories();
     },
+    staleTime: 10 * 60 * 1000,
   });
 
   // Pre-load existing preferences if any

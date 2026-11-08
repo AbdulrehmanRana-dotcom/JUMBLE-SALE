@@ -1,6 +1,6 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 /**
  * Converts a local file URI (file://, content://, or web blob:) into a Blob.
@@ -46,17 +46,21 @@ export async function compressAndUploadDealImage(
   brandId: string,
   sourceUri: string
 ): Promise<string> {
-  // If already an HTTP/HTTPS remote URL, return directly
-  if (sourceUri.startsWith('http://') || sourceUri.startsWith('https://')) {
+  // If already an HTTP/HTTPS remote URL or persistent data URI, return directly
+  if (
+    sourceUri.startsWith('http://') ||
+    sourceUri.startsWith('https://') ||
+    sourceUri.startsWith('data:')
+  ) {
     return sourceUri;
   }
 
   try {
-    // 1. Compress and resize client-side
+    // 1. Compress and resize client-side with base64 generation for zero-loss offline persistence
     const manipulated = await ImageManipulator.manipulateAsync(
       sourceUri,
-      [{ resize: { width: 1200 } }],
-      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      [{ resize: { width: 1080 } }],
+      { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true }
     );
 
     // 2. Convert to blob & validate size (< 5MB)
@@ -68,30 +72,38 @@ export async function compressAndUploadDealImage(
       );
     }
 
-    // 3. Upload to Supabase Storage ('deals' or 'deal-images' bucket)
-    const filename = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
-    const storagePath = `${brandId}/${filename}`;
+    // 3. Upload to Supabase Storage ('deals' or 'deal-images' bucket) if live
+    if (isSupabaseConfigured) {
+      const filename = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
+      const storagePath = `${brandId}/${filename}`;
 
-    for (const bucketName of ['deals', 'deal-images']) {
-      try {
-        const { data, error } = await supabase.storage
-          .from(bucketName)
-          .upload(storagePath, blob, {
-            contentType: 'image/jpeg',
-            upsert: true,
-          });
-
-        if (!error && data) {
-          const { data: urlData } = supabase.storage
+      for (const bucketName of ['deals', 'deal-images']) {
+        try {
+          const { data, error } = await supabase.storage
             .from(bucketName)
-            .getPublicUrl(data.path);
-          if (urlData?.publicUrl) {
-            return urlData.publicUrl;
+            .upload(storagePath, blob, {
+              contentType: 'image/jpeg',
+              upsert: true,
+            });
+
+          if (!error && data) {
+            const { data: urlData } = supabase.storage
+              .from(bucketName)
+              .getPublicUrl(data.path);
+            if (urlData?.publicUrl) {
+              return urlData.publicUrl;
+            }
           }
+        } catch {
+          // try next bucket
         }
-      } catch {
-        // try next bucket
       }
+    }
+
+    // 4. In web/offline mode where temporary blob: URLs expire on tab refresh,
+    // return persistent data URI so the uploaded photo never breaks
+    if (manipulated.base64) {
+      return `data:image/jpeg;base64,${manipulated.base64}`;
     }
 
     return manipulated.uri;

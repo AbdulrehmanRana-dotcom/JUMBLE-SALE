@@ -17,6 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { z } from 'zod';
@@ -26,8 +27,10 @@ import { Button } from '@/components/ui/Button';
 import { Header } from '@/components/ui/Header';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/Toast';
+import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
 import { getLocalBrandDeals, saveLocalDeal } from '@/lib/dealStore';
 import { generateBrandPromoCopy } from '@/lib/gemini';
+import { createNotification } from '@/lib/notificationStore';
 import { compressAndUploadDealImage } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
@@ -35,8 +38,9 @@ import type { Category, Deal } from '@/types/database.types';
 import { colors, radii, spacing, typography } from '@/theme';
 
 const PAKISTANI_CITIES = [
-  'Karachi',
+  'All Pakistan',
   'Lahore',
+  'Karachi',
   'Islamabad',
   'Rawalpindi',
   'Faisalabad',
@@ -68,12 +72,8 @@ const dealSchema = z
     terms: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.deal_type === 'in_store' && (!data.city || !data.city.trim())) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'City is required for in-store promotions',
-        path: ['city'],
-      });
+    if (!data.city || !data.city.trim()) {
+      data.city = 'All Pakistan';
     }
 
     const start = new Date(data.start_date);
@@ -100,8 +100,15 @@ export default function CreateOrEditDealScreen() {
 
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  // 1. Cover Photo (Compulsory / Lazmi)
+  const [coverPhoto, setCoverPhoto] = useState('');
+  const [coverPhotoInputUrl, setCoverPhotoInputUrl] = useState('');
+  const [uploadingCover, setUploadingCover] = useState(false);
+
+  // 2. Extra Product Photos (Different option - up to 5 photos)
+  const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
+  const [extraPhotoInputUrl, setExtraPhotoInputUrl] = useState('');
+  const [uploadingExtra, setUploadingExtra] = useState(false);
   const [lastSavedDraftAt, setLastSavedDraftAt] = useState<string | null>(null);
   const [currentDealId, setCurrentDealId] = useState<string | null>(
     dealId || null
@@ -188,16 +195,12 @@ export default function CreateOrEditDealScreen() {
   };
 
   // 1. Fetch Categories
-  const { data: categories = [] } = useQuery<Category[]>({
+  const { data: categories = DEFAULT_CATEGORIES } = useQuery<Category[]>({
     queryKey: ['categories'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data ?? [];
+      return getLocalCategories();
     },
+    staleTime: 10 * 60 * 1000,
   });
 
   // 2. Fetch Existing Deal if Editing
@@ -212,7 +215,12 @@ export default function CreateOrEditDealScreen() {
         if (localMatch) {
           setOriginalDeal(localMatch);
           setCurrentDealId(localMatch.id);
-          setImageUrls(localMatch.image_urls || []);
+          const cover = localMatch.banner_url || localMatch.image_urls?.[0] || '';
+          const extras = Array.isArray(localMatch.image_urls) && localMatch.image_urls.length > 1
+            ? localMatch.image_urls.slice(1, 6)
+            : [];
+          setCoverPhoto(cover);
+          setExtraPhotos(extras);
           reset({
             title: localMatch.title,
             description: localMatch.description,
@@ -243,7 +251,12 @@ export default function CreateOrEditDealScreen() {
           const d = data as Deal;
           setOriginalDeal(d);
           setCurrentDealId(d.id);
-          setImageUrls(d.image_urls || []);
+          const cover = d.banner_url || d.image_urls?.[0] || '';
+          const extras = Array.isArray(d.image_urls) && d.image_urls.length > 1
+            ? d.image_urls.slice(1, 6)
+            : [];
+          setCoverPhoto(cover);
+          setExtraPhotos(extras);
           reset({
             title: d.title,
             description: d.description,
@@ -292,7 +305,11 @@ export default function CreateOrEditDealScreen() {
           ? new Date(values.end_date).toISOString()
           : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         terms: values.terms?.trim() || null,
-        image_urls: imageUrls,
+        banner_url: coverPhoto.trim() || null,
+        image_urls: [
+          ...(coverPhoto.trim() ? [coverPhoto.trim()] : []),
+          ...extraPhotos.map((p) => p.trim()).filter(Boolean),
+        ],
         updated_at: new Date().toISOString(),
       };
 
@@ -343,25 +360,80 @@ export default function CreateOrEditDealScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  // 4. Image Upload & Client-Side Compression (Max 5 images)
-  const handlePickImages = async () => {
+  // 4A. Cover Photo Handlers (Compulsory)
+  const handlePickCoverPhoto = async () => {
     if (!brand?.id) return;
-    if (imageUrls.length >= 5) {
-      toast.show('Maximum 5 images allowed per promotion.', 'warning');
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: false,
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setUploadingCover(true);
+        try {
+          const publicUrl = await compressAndUploadDealImage(
+            brand.id,
+            result.assets[0].uri
+          );
+          setCoverPhoto(publicUrl || result.assets[0].uri);
+          toast.show('Main Cover photo uploaded! ⭐', 'success');
+        } catch {
+          setCoverPhoto(result.assets[0].uri);
+        } finally {
+          setUploadingCover(false);
+        }
+      }
+    } catch (err: any) {
+      toast.show(err.message || 'Failed to select cover photo', 'error');
+      setUploadingCover(false);
+    }
+  };
+
+  const handleSetCoverPhotoUrl = () => {
+    const trimmed = coverPhotoInputUrl.trim();
+    if (!trimmed) {
+      toast.show('Please enter a cover photo URL', 'warning');
+      return;
+    }
+    if (
+      !trimmed.startsWith('http://') &&
+      !trimmed.startsWith('https://') &&
+      !trimmed.startsWith('data:')
+    ) {
+      toast.show('URL must start with http:// or https://', 'warning');
+      return;
+    }
+    setCoverPhoto(trimmed);
+    setCoverPhotoInputUrl('');
+    toast.show('Main Cover photo set! ⭐', 'success');
+  };
+
+  const handleRemoveCoverPhoto = () => {
+    setCoverPhoto('');
+    toast.show('Cover photo removed', 'info');
+  };
+
+  // 4B. Extra Photos Handlers (Optional - up to 5)
+  const handlePickExtraPhotos = async () => {
+    if (!brand?.id) return;
+    if (extraPhotos.length >= 5) {
+      toast.show('Maximum 5 extra photos allowed per promotion.', 'warning');
       return;
     }
 
     try {
-      const remainingLimit = 5 - imageUrls.length;
+      const remainingLimit = 5 - extraPhotos.length;
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsMultipleSelection: true,
         selectionLimit: remainingLimit,
-        quality: 1,
+        quality: 0.85,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setUploadingImage(true);
+        setUploadingExtra(true);
         const uploadedUrls: string[] = [];
 
         for (const asset of result.assets) {
@@ -371,31 +443,61 @@ export default function CreateOrEditDealScreen() {
               asset.uri
             );
             uploadedUrls.push(publicUrl);
-          } catch (compressErr: any) {
-            toast.show(
-              compressErr.message || 'Image compression/upload failed',
-              'error'
-            );
+          } catch {
+            uploadedUrls.push(asset.uri);
           }
         }
 
         if (uploadedUrls.length > 0) {
-          setImageUrls((prev) => [...prev, ...uploadedUrls].slice(0, 5));
-          toast.show(
-            `${uploadedUrls.length} image(s) compressed & uploaded!`,
-            'success'
-          );
+          setExtraPhotos((prev) => [...prev, ...uploadedUrls].slice(0, 5));
+          toast.show(`${uploadedUrls.length} extra angle(s) added! 📸`, 'success');
         }
       }
     } catch (err: any) {
-      toast.show(err.message || 'Failed to select image', 'error');
+      toast.show(err.message || 'Failed to select extra images', 'error');
     } finally {
-      setUploadingImage(false);
+      setUploadingExtra(false);
     }
   };
 
-  const handleRemoveImage = (index: number) => {
-    setImageUrls((prev) => prev.filter((_, idx) => idx !== index));
+  const handleAddExtraPhotoUrl = () => {
+    const trimmed = extraPhotoInputUrl.trim();
+    if (!trimmed) {
+      toast.show('Please enter an extra photo URL', 'warning');
+      return;
+    }
+    if (
+      !trimmed.startsWith('http://') &&
+      !trimmed.startsWith('https://') &&
+      !trimmed.startsWith('data:')
+    ) {
+      toast.show('URL must start with http:// or https://', 'warning');
+      return;
+    }
+    if (extraPhotos.length >= 5) {
+      toast.show('Maximum 5 extra photos allowed', 'warning');
+      return;
+    }
+    setExtraPhotos((prev) => [...prev, trimmed]);
+    setExtraPhotoInputUrl('');
+    toast.show('Extra angle photo added! 🖼️', 'success');
+  };
+
+  const handleMoveExtraPhoto = (fromIndex: number, direction: 'left' | 'right') => {
+    const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= extraPhotos.length) return;
+    setExtraPhotos((prev) => {
+      const copy = [...prev];
+      const temp = copy[fromIndex];
+      copy[fromIndex] = copy[toIndex];
+      copy[toIndex] = temp;
+      return copy;
+    });
+  };
+
+  const handleRemoveExtraPhoto = (index: number) => {
+    setExtraPhotos((prev) => prev.filter((_, idx) => idx !== index));
+    toast.show('Extra photo removed', 'info');
   };
 
   // 5. Quick Duration Setter
@@ -434,11 +536,21 @@ export default function CreateOrEditDealScreen() {
       return;
     }
 
+    if (!coverPhoto.trim()) {
+      toast.show('Main Cover Photo lazmi (compulsory) hai! Please upload or enter a cover photo.', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const discountVal = parseFloat(data.discount_pct);
       const startIso = new Date(data.start_date).toISOString();
       const endIso = new Date(data.end_date).toISOString();
+
+      const finalImageUrls = [
+        coverPhoto.trim(),
+        ...extraPhotos.map((p) => p.trim()).filter(Boolean),
+      ];
 
       const dealPayload: any = {
         brand_id: brand.id,
@@ -451,7 +563,8 @@ export default function CreateOrEditDealScreen() {
         start_date: startIso,
         end_date: endIso,
         terms: data.terms?.trim() || null,
-        image_urls: imageUrls,
+        banner_url: coverPhoto.trim(),
+        image_urls: finalImageUrls,
         buy_url: (data as any).buy_url?.trim() || null,
         website_url: (data as any).buy_url?.trim() || null,
         original_price: (data as any).original_price ? parseFloat((data as any).original_price) : null,
@@ -499,6 +612,35 @@ export default function CreateOrEditDealScreen() {
         }
 
         await saveLocalDeal({ ...dealPayload, id: createdId });
+
+        // Dispatch genuine notifications for Deal submission
+        try {
+          // 1. To Brand
+          await createNotification({
+            role: 'brand',
+            userId: brand.id,
+            brand_id: brand.id,
+            deal_id: createdId,
+            category: 'deal',
+            title: 'Deal Submitted for Review ⏳',
+            body: `Aapki deal "${dealPayload.title}" submit ho chuki hai. Admin approval ke baad live ho jaye gi.`,
+            action_url: '/(brand)/posts',
+          });
+
+          // 2. To Admin
+          await createNotification({
+            role: 'admin',
+            userId: 'admin',
+            deal_id: createdId,
+            category: 'moderation',
+            title: 'New Deal Moderation Queue',
+            body: `${brand.name} ne "${dealPayload.title}" submit ki hai marketplace review ke liye.`,
+            action_url: 'deals_queue',
+          });
+        } catch (notifErr) {
+          console.warn('[SubmitDeal] Notification dispatch notice:', notifErr);
+        }
+
         toast.show(
           'Promotion submitted! Awaiting Admin approval.',
           'success'
@@ -713,7 +855,12 @@ export default function CreateOrEditDealScreen() {
                         styles.catPill,
                         isSelected && styles.catPillSelected,
                       ]}
-                      onPress={() => setValue('category_id', cat.id)}>
+                      onPress={() =>
+                        setValue('category_id', cat.id, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                        })
+                      }>
                       <Text
                         style={[
                           styles.catPillText,
@@ -732,94 +879,240 @@ export default function CreateOrEditDealScreen() {
               )}
             </View>
 
-            {/* City Selection for In-Store Deals */}
-            {watchedType === 'in_store' && (
-              <View style={styles.pickerSection}>
-                <Text style={styles.inputLabel}>
-                  Available City (In-Store Outlets) *
-                </Text>
-                <View style={styles.cityGrid}>
-                  {PAKISTANI_CITIES.map((city) => {
-                    const isSelected = watchedCity === city;
-                    return (
-                      <Pressable
-                        key={city}
+            {/* City Selection (Matches User Filter & Preferences) */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.inputLabel}>
+                Target City Location (User Preference Match) *
+              </Text>
+              <View style={styles.cityGrid}>
+                {PAKISTANI_CITIES.map((city) => {
+                  const isSelected = (watchedCity || 'All Pakistan') === city;
+                  return (
+                    <Pressable
+                      key={city}
+                      style={[
+                        styles.cityChip,
+                        isSelected && styles.cityChipSelected,
+                      ]}
+                      onPress={() => setValue('city', city, { shouldDirty: true })}>
+                      <Text
                         style={[
-                          styles.cityChip,
-                          isSelected && styles.cityChipSelected,
-                        ]}
-                        onPress={() => setValue('city', city)}>
-                        <Text
-                          style={[
-                            styles.cityChipText,
-                            isSelected && styles.cityChipTextSelected,
-                          ]}>
-                          {city}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                {errors.city && (
-                  <Text style={styles.errorText}>{errors.city.message}</Text>
-                )}
+                          styles.cityChipText,
+                          isSelected && styles.cityChipTextSelected,
+                        ]}>
+                        {city}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
-            )}
+              {errors.city && (
+                <Text style={styles.errorText}>{errors.city.message}</Text>
+              )}
+            </View>
           </View>
 
-          {/* Card 3: Promotion Images (Up to 5, Client compressed) */}
+          {/* Card 3A: MAIN COVER PHOTO (COMPULSORY / LAZMI) */}
           <View style={styles.card}>
             <View style={styles.imageHeaderRow}>
-              <View>
-                <Text style={styles.cardTitle}>Deal Images</Text>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.cardTitle}>Main Cover Photo</Text>
+                  <Text style={styles.requiredStar}>*</Text>
+                  <View style={[styles.compulsoryBadge, !coverPhoto && styles.compulsoryBadgePending]}>
+                    <Ionicons
+                      name={coverPhoto ? 'checkmark-circle' : 'alert-circle'}
+                      size={12}
+                      color={coverPhoto ? colors.primary : colors.error}
+                    />
+                    <Text style={[styles.compulsoryBadgeText, !coverPhoto && { color: colors.error }]}>
+                      {coverPhoto ? 'Cover Set' : 'Required / Lazmi'}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={styles.imageSub}>
-                  Upload up to 5 banners/photos. Images are automatically compressed
-                  for fast mobile loading.
+                  Yeh photo Home Feed aur Explore cards par main banner ke tor par compulsory show hogi.
                 </Text>
               </View>
-              <Badge
-                label={`${imageUrls.length} / 5`}
-                variant={imageUrls.length >= 5 ? 'warning' : 'outline'}
-              />
             </View>
 
-            {/* Thumbnails Row */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.imageRow}>
-              {imageUrls.map((url, idx) => (
-                <View key={url + idx} style={styles.thumbnailWrap}>
-                  <Image source={{ uri: url }} style={styles.thumbnail} />
+            {coverPhoto ? (
+              <View style={styles.coverPreviewCard}>
+                <Image source={{ uri: coverPhoto }} style={styles.coverPreviewImage} />
+                <View style={styles.coverPhotoTopBadge}>
+                  <Ionicons name="star" size={11} color="#090A0E" />
+                  <Text style={styles.coverPhotoTopBadgeText}>MAIN COVER PHOTO</Text>
+                </View>
+                <View style={styles.coverActionButtons}>
                   <Pressable
-                    style={styles.removeImageBtn}
-                    onPress={() => handleRemoveImage(idx)}
+                    style={styles.changeCoverBtn}
+                    onPress={handlePickCoverPhoto}
+                    disabled={uploadingCover}>
+                    <Ionicons name="camera-outline" size={13} color={colors.primary} />
+                    <Text style={styles.changeCoverText}>Change</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.removeCoverBtn}
+                    onPress={handleRemoveCoverPhoto}
                     hitSlop={6}>
-                    <Ionicons name="close-circle" size={20} color={colors.error} />
+                    <Ionicons name="trash-outline" size={13} color={colors.error} />
+                    <Text style={styles.removeCoverText}>Remove</Text>
                   </Pressable>
                 </View>
-              ))}
-
-              {imageUrls.length < 5 && (
+              </View>
+            ) : (
+              <View style={styles.emptyCoverContainer}>
                 <Pressable
                   style={styles.addImageBox}
-                  onPress={handlePickImages}
-                  disabled={uploadingImage}>
-                  {uploadingImage ? (
+                  onPress={handlePickCoverPhoto}
+                  disabled={uploadingCover}>
+                  {uploadingCover ? (
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : (
                     <>
                       <Ionicons
                         name="camera-outline"
-                        size={28}
+                        size={24}
                         color={colors.primary}
                       />
-                      <Text style={styles.addImageText}>Add Image</Text>
+                      <Text style={styles.addImageText}>
+                        Upload Main Cover Photo * (Required)
+                      </Text>
                     </>
                   )}
                 </Pressable>
-              )}
-            </ScrollView>
+
+                {/* Direct Cover URL input */}
+                <View style={styles.urlAddRow}>
+                  <Ionicons name="link-outline" size={16} color={colors.textMuted} />
+                  <TextInput
+                    style={styles.urlInputField}
+                    placeholder="Or paste direct Cover Photo URL (https://...)"
+                    placeholderTextColor={colors.textMuted}
+                    value={coverPhotoInputUrl}
+                    onChangeText={setCoverPhotoInputUrl}
+                    autoCapitalize="none"
+                  />
+                  <Pressable
+                    style={[styles.addUrlActionBtn, !coverPhotoInputUrl.trim() && { opacity: 0.5 }]}
+                    onPress={handleSetCoverPhotoUrl}
+                    disabled={!coverPhotoInputUrl.trim()}>
+                    <Ionicons name="checkmark" size={14} color={colors.textInverse} />
+                    <Text style={styles.addUrlActionText}>Set Cover</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Card 3B: ADDITIONAL PRODUCT PHOTOS (DIFFERENT OPTION - UP TO 5) */}
+          <View style={styles.card}>
+            <View style={styles.imageHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.cardTitle}>Additional Photos ({extraPhotos.length}/5)</Text>
+                  <Text style={styles.optionalBadgeText}>(Optional)</Text>
+                </View>
+                <Text style={styles.imageSub}>
+                  Amazon-style swipe gallery ke liye mazeed 5 mukhtalif angles ya pics add karein (Side, Back, Model, Detail view).
+                </Text>
+              </View>
+              <Badge
+                label={`${extraPhotos.length} / 5`}
+                variant={extraPhotos.length >= 5 ? 'warning' : extraPhotos.length > 0 ? 'success' : 'outline'}
+              />
+            </View>
+
+            {/* Extra Photos Thumbnails Row */}
+            {extraPhotos.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.imageRow}>
+                {extraPhotos.map((url, idx) => (
+                  <View key={url + idx} style={styles.thumbnailWrap}>
+                    <Image source={{ uri: url }} style={styles.thumbnail} />
+                    <View style={[styles.photoBadge, styles.photoBadgeExtra]}>
+                      <Ionicons name="images" size={10} color="#FFFFFF" />
+                      <Text style={styles.photoBadgeText}>Angle #{idx + 1}</Text>
+                    </View>
+                    <View style={styles.photoActionsBar}>
+                      <View style={{ flexDirection: 'row', gap: 4, marginLeft: 'auto' }}>
+                        {idx > 0 && (
+                          <Pressable
+                            style={styles.orderBtn}
+                            onPress={() => handleMoveExtraPhoto(idx, 'left')}
+                            hitSlop={4}>
+                            <Ionicons name="chevron-back" size={11} color="#FFFFFF" />
+                          </Pressable>
+                        )}
+                        {idx < extraPhotos.length - 1 && (
+                          <Pressable
+                            style={styles.orderBtn}
+                            onPress={() => handleMoveExtraPhoto(idx, 'right')}
+                            hitSlop={4}>
+                            <Ionicons name="chevron-forward" size={11} color="#FFFFFF" />
+                          </Pressable>
+                        )}
+                        <Pressable
+                          style={styles.deletePhotoBtn}
+                          onPress={() => handleRemoveExtraPhoto(idx)}
+                          hitSlop={4}>
+                          <Ionicons name="trash-outline" size={12} color={colors.error} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            {/* Add Extra Photos Controls */}
+            {extraPhotos.length < 5 && (
+              <View style={styles.addPhotosWrap}>
+                <Pressable
+                  style={[styles.addImageBox, { borderColor: 'rgba(56, 189, 248, 0.4)', backgroundColor: 'rgba(56, 189, 248, 0.08)' }]}
+                  onPress={handlePickExtraPhotos}
+                  disabled={uploadingExtra}>
+                  {uploadingExtra ? (
+                    <ActivityIndicator size="small" color="#38BDF8" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="add-circle-outline"
+                        size={22}
+                        color="#38BDF8"
+                      />
+                      <Text style={[styles.addImageText, { color: '#38BDF8' }]}>
+                        {extraPhotos.length === 0
+                          ? '+ Add Extra Angles from Gallery / Files (up to 5)'
+                          : `+ Add More Angles (${5 - extraPhotos.length} remaining)`}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {/* Direct Extra URL input */}
+                <View style={styles.urlAddRow}>
+                  <Ionicons name="link-outline" size={16} color={colors.textMuted} />
+                  <TextInput
+                    style={styles.urlInputField}
+                    placeholder="Or paste extra photo URL (https://...)"
+                    placeholderTextColor={colors.textMuted}
+                    value={extraPhotoInputUrl}
+                    onChangeText={setExtraPhotoInputUrl}
+                    autoCapitalize="none"
+                  />
+                  <Pressable
+                    style={[styles.addUrlActionBtn, !extraPhotoInputUrl.trim() && { opacity: 0.5 }, { backgroundColor: '#38BDF8' }]}
+                    onPress={handleAddExtraPhotoUrl}
+                    disabled={!extraPhotoInputUrl.trim()}>
+                    <Ionicons name="add" size={14} color="#090A0E" />
+                    <Text style={[styles.addUrlActionText, { color: '#090A0E' }]}>Add</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
           </View>
 
           {/* Card 4: Dates & Duration */}
@@ -1194,6 +1487,118 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
+  requiredStar: {
+    color: '#FF4D4D',
+    fontSize: 14,
+    fontWeight: '900',
+    marginLeft: 2,
+  },
+  compulsoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  compulsoryBadgePending: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  compulsoryBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#00FF66',
+    letterSpacing: 0.3,
+  },
+  optionalBadgeText: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#64748B',
+    marginLeft: 4,
+  },
+  coverPreviewCard: {
+    width: '100%',
+    height: 180,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1.5,
+    borderColor: '#00FF66',
+    backgroundColor: '#090A0E',
+  },
+  coverPreviewImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  coverPhotoTopBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  coverPhotoTopBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#090A0E',
+    letterSpacing: 0.5,
+  },
+  coverActionButtons: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  changeCoverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(9, 10, 14, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 102, 0.4)',
+  },
+  changeCoverText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00FF66',
+  },
+  removeCoverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(9, 10, 14, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  removeCoverText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FF4D4D',
+  },
+  emptyCoverContainer: {
+    gap: 8,
+  },
   imageSub: {
     ...typography.caption,
     color: colors.textSecondary,
@@ -1207,42 +1612,141 @@ const styles = StyleSheet.create({
   },
   thumbnailWrap: {
     position: 'relative',
-    width: 90,
-    height: 90,
+    width: 130,
     borderRadius: radii.md,
     overflow: 'hidden',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+  },
+  thumbnailCoverWrap: {
+    borderColor: colors.primary,
+    backgroundColor: '#0D1A12',
   },
   thumbnail: {
     width: '100%',
-    height: '100%',
+    height: 95,
     resizeMode: 'cover',
   },
-  removeImageBtn: {
+  photoBadge: {
     position: 'absolute',
-    top: 3,
-    right: 3,
+    top: 4,
+    left: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  photoBadgeCover: {
+    backgroundColor: colors.primary,
+  },
+  photoBadgeExtra: {
+    backgroundColor: 'rgba(9, 10, 14, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  photoBadgeText: {
+    ...typography.caption,
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  photoActionsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 5,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  setCoverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  setCoverText: {
+    ...typography.caption,
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  orderBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deletePhotoBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPhotosWrap: {
+    gap: 10,
+    marginTop: 6,
   },
   addImageBox: {
-    width: 90,
-    height: 90,
+    flexDirection: 'row',
+    width: '100%',
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
     borderRadius: radii.md,
     borderWidth: 1.5,
     borderStyle: 'dashed',
-    borderColor: colors.border,
+    borderColor: 'rgba(0, 255, 102, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surfaceMuted,
-    gap: 4,
+    backgroundColor: '#0D1A12',
+    gap: 8,
   },
   addImageText: {
     ...typography.caption,
     color: colors.primary,
-    fontSize: 11,
-    fontFamily: typography.bodyMedium.fontFamily,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  urlAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing[3],
+    gap: spacing[2],
+  },
+  urlInputField: {
+    flex: 1,
+    paddingVertical: 9,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  addUrlActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  addUrlActionText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textInverse,
   },
   presetRow: {
     flexDirection: 'row',

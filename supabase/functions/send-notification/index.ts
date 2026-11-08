@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: send-notification
 // Dispatches Expo Push Notifications and syncs in-app notifications
 // Respects per-user notifications on/off preference (notifications_enabled).

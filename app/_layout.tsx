@@ -12,6 +12,7 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
+import { InFlightBanner } from '@/components/notifications/InFlightBanner';
 import { AppProviders } from '@/providers/AppProviders';
 import { useAuth } from '@/providers/AuthProvider';
 import { colors } from '@/theme';
@@ -39,16 +40,29 @@ function RootLayoutNav() {
       return;
     }
 
-    // 2. Guest Mode Navigation (Visitors can browse consumer tabs)
+    // 2. Guest Mode Navigation (Visitors can browse consumer tabs and shared deals)
     if (isGuest) {
-      if (currentGroup !== '(consumer)' && currentGroup !== '(auth)') {
+      const isAllowedGuestRoute =
+        currentGroup === '(consumer)' ||
+        ['deal', 'brand', 'category'].includes(currentGroup) ||
+        currentGroup === '(auth)';
+      if (!isAllowedGuestRoute) {
         router.replace('/(consumer)');
       }
       return;
     }
 
-    // 3. Unauthenticated Visitors (Redirect to Login unless already in auth)
+    // 3. Unauthenticated Visitors (Allow viewing shared deals/brands directly, otherwise redirect to Login)
     if (!session) {
+      const isPublicSharedRoute =
+        currentGroup === 'deal' ||
+        currentGroup === 'brand' ||
+        (currentGroup === '(consumer)' && (segList[1] === 'deal' || segList[1] === 'brand'));
+
+      if (isPublicSharedRoute) {
+        return; // Allow viewing shared deal or brand details without forcing login
+      }
+
       if (currentGroup !== '(auth)') {
         router.replace('/(auth)/login');
       }
@@ -65,7 +79,7 @@ function RootLayoutNav() {
         const brandStatus = brand?.status ?? 'pending';
         const isBrandRoute =
           currentGroup === '(brand)' ||
-          ['posts', 'explore', 'profile', 'agent', 'create-deal', 'deal'].includes(currentGroup);
+          ['posts', 'explore', 'profile', 'agent', 'create-deal'].includes(currentGroup);
 
         if (brandStatus === 'rejected') {
           if (!isBrandRoute || segList[1] !== 'rejected') {
@@ -88,7 +102,7 @@ function RootLayoutNav() {
       } else {
         const isConsumerRoute =
           currentGroup === '(consumer)' ||
-          ['deal', 'category', 'assistant', 'saved', 'search', 'onboarding'].includes(currentGroup);
+          ['deal', 'brand', 'category', 'assistant', 'saved', 'search', 'onboarding'].includes(currentGroup);
 
         if (!isConsumerRoute) {
           router.replace('/(consumer)');
@@ -150,6 +164,7 @@ export default function RootLayout() {
     <AppProviders>
       <StatusBar style="light" />
       <RootLayoutNav />
+      <InFlightBanner />
     </AppProviders>
   );
 

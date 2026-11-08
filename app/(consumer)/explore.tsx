@@ -18,10 +18,13 @@ import {
 } from 'react-native';
 
 import { EmptyState } from '@/components/ui/EmptyState';
-import { getTopEngagedBrands, type EngagedBrand } from '@/lib/brandStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
+import { getLocalBrands, getTopEngagedBrands, KHAADI_BRAND, type EngagedBrand } from '@/lib/brandStore';
+import { DEFAULT_SEED_DEALS, getLocalBrandDeals, isDealActive } from '@/lib/dealStore';
 import { fetchPersonalizedRecommendations, type ScoredDeal } from '@/lib/gemini';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onExploreTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import { spacing, typography } from '@/theme';
 import type { Deal } from '@/types/database.types';
@@ -32,6 +35,16 @@ export default function ConsumerExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string | null>(null);
   const [personalizedList, setPersonalizedList] = useState<ScoredDeal[]>([]);
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+
+  // Instagram-style: Tapping Explore in bottom nav clears filters and query
+  useEffect(() => {
+    const unsubscribe = onExploreTabReset(() => {
+      setSearchQuery('');
+      setSelectedBrandFilter(null);
+    });
+    return unsubscribe;
+  }, []);
 
   // Fetch Real Top Registered Brands ranked by engagement (clicks, views, likes, comments, shares)
   const { data: topBrands = [] } = useQuery<EngagedBrand[]>({
@@ -39,10 +52,10 @@ export default function ConsumerExploreScreen() {
     queryFn: async () => {
       return getTopEngagedBrands();
     },
-    staleTime: 5 * 1000,
+    staleTime: 60 * 1000,
   });
 
-  // Fetch Database Deals + Local Deals
+  // Fetch Database Deals + Local Deals (Instant 0ms cache + fast network race)
   const {
     data: deals = [],
     isLoading,
@@ -51,22 +64,45 @@ export default function ConsumerExploreScreen() {
   } = useQuery<Deal[]>({
     queryKey: ['consumer-explore-deals'],
     queryFn: async () => {
-      const fallback = await getLocalBrandDeals();
+      const localDeals = await getLocalBrandDeals();
+      const localBrands = await getLocalBrands();
+      const activeLocal = localDeals.filter(isDealActive).map((d) => {
+        const brandMatch =
+          (d as any).brand && (d as any).brand.name !== 'Featured Brand'
+            ? (d as any).brand
+            : localBrands.find((b) => b.id === d.brand_id) || KHAADI_BRAND;
+        return {
+          ...d,
+          brand: brandMatch,
+          brand_name: brandMatch.name,
+        };
+      });
+
+      if (!isSupabaseConfigured) {
+        return activeLocal as Deal[];
+      }
+
       try {
-        const { data, error } = await supabase
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 800)
+        );
+        const queryPromise = supabase
           .from('deals')
           .select('*, brand:brands(*), category:categories(*)')
           .eq('status', 'active')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
-          return data as Deal[];
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && res.data.length > 0) {
+          const liveDeals = (res.data as Deal[]).filter(isDealActive);
+          return liveDeals;
         }
-        return fallback;
-      } catch {
-        return fallback;
+      } catch (err) {
+        console.warn('[ExploreScreen] Supabase query notice:', err);
       }
+      return activeLocal as Deal[];
     },
+    staleTime: 2 * 60 * 1000,
   });
 
   // Calculate Personalized Recommendations based on liked/saved categories
@@ -131,6 +167,13 @@ export default function ConsumerExploreScreen() {
             <Ionicons name="search" size={18} color="#090A0E" />
           </Pressable>
         </View>
+
+        <NotificationBell
+          role="consumer"
+          userId={user?.id}
+          onPress={() => setNotificationsModalOpen(true)}
+          style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#141721', borderColor: '#202432' }}
+        />
       </View>
 
       {/* ─── 2. TRENDING NOW HERO BANNER ─── */}
@@ -218,7 +261,7 @@ export default function ConsumerExploreScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {isLoading ? (
+      {isLoading && filteredDeals.length === 0 ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color="#00FF66" />
         </View>
@@ -249,7 +292,7 @@ export default function ConsumerExploreScreen() {
             const imageUri =
               item.image_urls?.[0] ||
               'https://images.unsplash.com/photo-1524805444758-089113d48a6d?w=800&q=80';
-            const brandName = (item as any).brand?.name || (item as any).brand_name || 'Featured Brand';
+            const brandName = (item as any).brand?.name || (item as any).brand_name || 'Khaadi';
             const itemPrice = (item as any).price || item.discount_price;
             const formattedPrice = itemPrice
               ? `Rs. ${itemPrice.toLocaleString()}`
@@ -289,6 +332,14 @@ export default function ConsumerExploreScreen() {
           }}
         />
       )}
+
+      {/* In-App Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        role="consumer"
+        userId={user?.id}
+      />
     </SafeAreaView>
   );
 }

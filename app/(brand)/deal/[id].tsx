@@ -27,7 +27,7 @@ import {
 } from '@/lib/activityStore';
 import { getLocalBrands } from '@/lib/brandStore';
 import { getLocalBrandDeals } from '@/lib/dealStore';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { radii, spacing, typography } from '@/theme';
 import type { Deal } from '@/types/database.types';
@@ -49,33 +49,38 @@ export default function BrandDealDetailScreen() {
 
       let dealData: any = null;
 
-      try {
-        const { data, error } = await supabase
-          .from('deals')
-          .select('*, brand:brands(*), category:categories(*)')
-          .eq('id', id)
-          .maybeSingle();
-
-        if (!error && data) {
-          dealData = data;
-        }
-      } catch (err) {
-        console.warn('[BrandDealDetail] Supabase query notice:', err);
+      // 1. Fast local cache lookup (instant 0ms response)
+      const localDeals = await getLocalBrandDeals();
+      const found = localDeals.find((d) => d.id === id);
+      if (found) {
+        const localBrands = await getLocalBrands();
+        const brandMatch = (found as any).brand || localBrands.find((b) => b.id === found.brand_id) || {
+          id: found.brand_id,
+          name: authBrand?.name || profile?.display_name || 'Khaadi',
+          category: 'Fashion & Apparel',
+          logo_url: null,
+        };
+        dealData = { ...found, brand: brandMatch };
       }
 
-      // Fallback to local deals store
-      if (!dealData) {
-        const localDeals = await getLocalBrandDeals();
-        const found = localDeals.find((d) => d.id === id);
-        if (found) {
-          const localBrands = await getLocalBrands();
-          const brandMatch = (found as any).brand || localBrands.find((b) => b.id === found.brand_id) || {
-            id: found.brand_id,
-            name: authBrand?.name || profile?.display_name || 'Featured Brand',
-            category: 'Fashion & Apparel',
-            logo_url: null,
-          };
-          dealData = { ...found, brand: brandMatch };
+      // 2. Query Supabase only if not found locally and live backend is configured
+      if (!dealData && isSupabaseConfigured) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 1500)
+          );
+          const queryPromise = supabase
+            .from('deals')
+            .select('*, brand:brands(*), category:categories(*)')
+            .eq('id', id)
+            .maybeSingle();
+
+          const res: any = await Promise.race([queryPromise, timeoutPromise]);
+          if (res?.data) {
+            dealData = res.data;
+          }
+        } catch (err) {
+          console.warn('[BrandDealDetail] Supabase query notice:', err);
         }
       }
 
@@ -242,7 +247,9 @@ export default function BrandDealDetailScreen() {
 
         {/* ─── 3. TITLE & CATEGORY ─── */}
         <View style={styles.titleRow}>
-          <Text style={styles.dealTitle}>{deal.title}</Text>
+          <Text style={styles.dealTitle}>
+            {(deal.title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim()}
+          </Text>
           <View style={styles.categoryPill}>
             <Ionicons name="pricetag" size={12} color="#00FF66" />
             <Text style={styles.categoryPillText}>{categoryName}</Text>

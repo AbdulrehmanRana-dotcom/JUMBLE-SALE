@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -18,6 +18,8 @@ import {
 
 import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { DealCardSkeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -31,7 +33,8 @@ import {
 import { getLocalBrands } from '@/lib/brandStore';
 import { getLocalBrandDeals } from '@/lib/dealStore';
 import { interactionLogger } from '@/lib/interactionLogger';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onBrandHomeTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import { typography } from '@/theme';
 import type { Brand, Deal } from '@/types/database.types';
@@ -48,14 +51,25 @@ const CATEGORIES = [
 
 export default function BrandDashboardScreen() {
   const router = useRouter();
-  const { user, profile, brand: authBrand } = useAuth();
+  const { user, brand: authBrand } = useAuth();
   const toast = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+
+  // Instagram-style: Tapping Home in bottom nav resets search & category filters
+  useEffect(() => {
+    const unsubscribe = onBrandHomeTabReset(() => {
+      setSearchQuery('');
+      setSelectedCategory('All');
+      setNotificationsModalOpen(false);
+    });
+    return unsubscribe;
+  }, []);
 
   // 1. Fetch Current Brand Profile (for header branding)
-  const { data: brand, refetch: refetchBrand } = useQuery<Brand | null>({
+  const { refetch: refetchBrand } = useQuery<Brand | null>({
     queryKey: ['my-brand-profile', user?.id],
     queryFn: async () => {
       const localBrands = await getLocalBrands();
@@ -113,14 +127,18 @@ export default function BrandDashboardScreen() {
           const brandMatch = localBrands.find((b) => b.id === d.brand_id);
           return {
             ...d,
-            brand: (d as any).brand || brandMatch || {
+            brand: (d as any).brand || brandMatch || localBrands[0] || {
               id: d.brand_id,
-              name: 'Featured Brand',
+              name: 'Khaadi',
               category: 'Fashion & Apparel',
-              logo_url: null,
+              logo_url: 'https://images.unsplash.com/photo-1544441893-675973e31985',
             },
           } as Deal;
         });
+
+      if (!isSupabaseConfigured) {
+        return activeLocal;
+      }
 
       try {
         const { data, error } = await supabase
@@ -180,7 +198,7 @@ export default function BrandDashboardScreen() {
   }, [allDeals, searchQuery, selectedCategory]);
 
   const handleCardPress = (deal: Deal | any) => {
-    interactionLogger.logInteraction(deal.id, 'click', user?.id);
+    interactionLogger.logInteraction(deal.id, 'view', user?.id);
     recordDealView(deal);
     router.push({
       pathname: '/(brand)/deal/[id]',
@@ -291,6 +309,13 @@ export default function BrandDashboardScreen() {
             <Ionicons name="search" size={18} color="#090A0E" />
           </Pressable>
         </View>
+
+        <NotificationBell
+          role="brand"
+          userId={user?.id}
+          onPress={() => setNotificationsModalOpen(true)}
+          style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: '#121622', borderColor: '#1E2330' }}
+        />
       </View>
 
       {/* ─── 2. CATEGORY HORIZONTAL CHIPS ─── */}
@@ -376,7 +401,7 @@ export default function BrandDashboardScreen() {
           }
           renderItem={({ item }) => {
             const brandObj = (item as any).brand;
-            const itemBrandName = brandObj?.name || 'Featured Brand';
+            const itemBrandName = brandObj?.name || (item as any).brand_name || 'Khaadi';
             const itemBrandLogo = brandObj?.logo_url || null;
 
             return (
@@ -403,6 +428,14 @@ export default function BrandDashboardScreen() {
           }}
         />
       )}
+
+      {/* In-App Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        role="brand"
+        userId={user?.id}
+      />
     </SafeAreaView>
   );
 }

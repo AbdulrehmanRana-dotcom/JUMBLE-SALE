@@ -2,13 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 
+import { emitExploreTabReset, emitHomeTabReset, emitProfileTabReset } from '@/lib/tabEvents';
 import { colors, typography } from '@/theme';
 
 export default function ConsumerLayout() {
   return (
     <Tabs
+      detachInactiveScreens={false}
       screenOptions={{
         headerShown: false,
+        lazy: true,
+        freezeOnBlur: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
@@ -25,6 +29,11 @@ export default function ConsumerLayout() {
       }}>
       <Tabs.Screen
         name="index"
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            emitHomeTabReset();
+          },
+        })}
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
@@ -38,6 +47,11 @@ export default function ConsumerLayout() {
       />
       <Tabs.Screen
         name="explore"
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            emitExploreTabReset();
+          },
+        })}
         options={{
           title: 'Explore',
           tabBarIcon: ({ color, focused }) => (
@@ -70,6 +84,11 @@ export default function ConsumerLayout() {
       />
       <Tabs.Screen
         name="profile"
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            emitProfileTabReset();
+          },
+        })}
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (

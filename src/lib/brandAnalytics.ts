@@ -1,6 +1,12 @@
 import { getAllActivities, getDealComments, getDealLikesCount } from '@/lib/activityStore';
+import { getPostClicksCount } from '@/lib/clickTracker';
 import { getLocalBrandDeals } from '@/lib/dealStore';
-import { supabase } from '@/lib/supabase';
+import {
+  getBrandAttributedPurchases,
+  getBrandSalesSummary,
+  type AttributedOrder,
+} from '@/lib/orderStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import type { AnalyticsDaily, Deal } from '@/types/database.types';
 
 export interface BrandMetrics {
@@ -10,6 +16,8 @@ export interface BrandMetrics {
   totalComments: number;
   totalClicks: number;
   ctr: string;
+  totalAttributedOrders: number;
+  totalSalesRevenue: number;
 }
 
 export interface DailyActivityPoint {
@@ -26,13 +34,29 @@ export interface DailyActivityPoint {
 export interface BrandAnalyticsData {
   metrics: BrandMetrics;
   last7Days: DailyActivityPoint[];
+  attributedOrders?: AttributedOrder[];
+}
+
+// In-memory RAM cache for 0ms re-renders
+const memoryBrandAnalyticsCache = new Map<string, { data: BrandAnalyticsData; ts: number }>();
+
+// Fast race timeout helper so Supabase never blocks UI
+async function safeRace<T>(queryPromise: any, fallback: T, ms: number = 700): Promise<T> {
+  try {
+    const timeout = new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), ms)
+    );
+    const res: any = await Promise.race([queryPromise, timeout]);
+    return (res?.data ?? (res !== undefined ? res : fallback)) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function fetchBrandLiveAnalytics(
   brandId?: string | null,
   brandName?: string
 ): Promise<BrandAnalyticsData> {
-  // Default empty structure (zero fake numbers)
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const today = new Date();
 
@@ -62,33 +86,46 @@ export async function fetchBrandLiveAnalytics(
         totalComments: 0,
         totalClicks: 0,
         ctr: '0.0%',
+        totalAttributedOrders: 0,
+        totalSalesRevenue: 0,
       },
       last7Days: emptyDays,
     };
   }
 
+  const cacheKey = `${brandId || ''}_${brandName || ''}`;
+  const cached = memoryBrandAnalyticsCache.get(cacheKey);
+  // Return within 0ms if cached within last 45 seconds
+  if (cached && Date.now() - cached.ts < 45000) {
+    return cached.data;
+  }
+
   try {
-    // 1. Fetch brand's deals from Supabase and local store
-    let brandDeals: Deal[] = [];
-    if (brandId) {
-      try {
-        const { data, error } = await supabase
-          .from('deals')
-          .select('*')
-          .eq('brand_id', brandId);
-
-        if (!error && Array.isArray(data) && data.length > 0) {
-          brandDeals = data as Deal[];
-        }
-      } catch {
-        // offline
-      }
-    }
-
-    const localDeals = await getLocalBrandDeals();
     const cleanBrandName = (brandName || '').toLowerCase().trim();
 
-    // Match local deals by brand_id OR brand_name
+    // 1. Concurrently run all root data sources in parallel with 700ms timeout
+    const [
+      supabaseDeals,
+      localDeals,
+      allActivities,
+      salesSummary,
+      attributedOrders,
+      dailyRowsData,
+    ] = await Promise.all([
+      brandId && isSupabaseConfigured
+        ? safeRace(supabase.from('deals').select('*').eq('brand_id', brandId), [], 700)
+        : Promise.resolve([]),
+      getLocalBrandDeals(),
+      getAllActivities(),
+      getBrandSalesSummary(brandId, brandName),
+      getBrandAttributedPurchases(brandId, brandName),
+      brandId && isSupabaseConfigured
+        ? safeRace(supabase.from('analytics_daily').select('*').eq('brand_id', brandId), [], 700)
+        : Promise.resolve([]),
+    ]);
+
+    // 2. Fast merge brand deals
+    let brandDeals: Deal[] = Array.isArray(supabaseDeals) ? [...supabaseDeals] : [];
     for (const ld of localDeals) {
       const matchesId = brandId && ld.brand_id === brandId;
       const bName = ((ld as any).brand?.name || (ld as any).brand_name || '').toLowerCase().trim();
@@ -104,109 +141,82 @@ export async function fetchBrandLiveAnalytics(
       }
     }
 
-    // Fallback if localDeals has single deal during testing
-    if (brandDeals.length === 0 && localDeals.length === 1) {
-      brandDeals = localDeals;
+    if (brandDeals.length === 0 && localDeals.length > 0) {
+      brandDeals = [...localDeals];
     }
 
     const dealIds = brandDeals.map((d) => d.id);
     const totalActivePosts = brandDeals.filter((d) => d.status === 'active').length;
 
-    // 2. Fetch Real Likes Count from Supabase
-    let totalLikes = 0;
-    if (dealIds.length > 0) {
-      try {
-        const { count, error } = await (supabase.from('likes') as any)
-          .select('*', { count: 'exact', head: true })
-          .in('deal_id', dealIds);
+    // 3. Parallel fetch of deal-level metrics (Likes, Comments, Interactions, Clicks)
+    const [
+      supabaseLikesRes,
+      supabaseCommentsRes,
+      supabaseInteractionsRes,
+      localLikesCounts,
+      localCommentsLists,
+      localClicksCounts,
+    ] = await Promise.all([
+      // Supabase likes count
+      dealIds.length > 0 && isSupabaseConfigured
+        ? safeRace(
+            (supabase.from('likes') as any)
+              .select('*', { count: 'exact', head: true })
+              .in('deal_id', dealIds),
+            null,
+            700
+          )
+        : Promise.resolve(null),
+      // Supabase comments count
+      dealIds.length > 0 && isSupabaseConfigured
+        ? safeRace(
+            (supabase.from('comments') as any)
+              .select('*', { count: 'exact', head: true })
+              .in('deal_id', dealIds),
+            null,
+            700
+          )
+        : Promise.resolve(null),
+      // Supabase interactions
+      dealIds.length > 0 && isSupabaseConfigured
+        ? safeRace(
+            (supabase.from('interactions') as any)
+              .select('type, deal_id, created_at')
+              .in('deal_id', dealIds),
+            [],
+            700
+          )
+        : Promise.resolve([]),
+      // Local deal likes
+      Promise.all(brandDeals.map((d) => getDealLikesCount(d.id))),
+      // Local deal comments
+      Promise.all(brandDeals.map((d) => getDealComments(d.id))),
+      // Local deal clicks
+      Promise.all(brandDeals.map((d) => getPostClicksCount(d.id))),
+    ]);
 
-        if (!error && typeof count === 'number') {
-          totalLikes = count;
-        }
-      } catch {
-        // offline
-      }
-    }
+    const totalLikesRemote =
+      supabaseLikesRes && typeof (supabaseLikesRes as any).count === 'number'
+        ? (supabaseLikesRes as any).count
+        : 0;
+    const totalCommentsRemote =
+      supabaseCommentsRes && typeof (supabaseCommentsRes as any).count === 'number'
+        ? (supabaseCommentsRes as any).count
+        : 0;
 
-    // 2b. Sum local deal likes for each brand deal from getDealLikesCount
-    let localDealLikesSum = 0;
-    for (const d of brandDeals) {
-      try {
-        const c = await getDealLikesCount(d.id);
-        localDealLikesSum += c;
-      } catch {
-        // ignore
-      }
-    }
+    const localDealLikesSum = localLikesCounts.reduce((acc, c) => acc + c, 0);
+    const localDealCommentsSum = localCommentsLists.reduce((acc, c) => acc + c.length, 0);
+    const localDealClicksSum = localClicksCounts.reduce((acc, c) => acc + c, 0);
 
-    // 3. Fetch Real Comments Count from Supabase
-    let totalComments = 0;
-    if (dealIds.length > 0) {
-      try {
-        const { count, error } = await (supabase.from('comments') as any)
-          .select('*', { count: 'exact', head: true })
-          .in('deal_id', dealIds);
-
-        if (!error && typeof count === 'number') {
-          totalComments = count;
-        }
-      } catch {
-        // offline
-      }
-    }
-
-    // 3b. Sum local comments count for each brand deal
-    let localDealCommentsSum = 0;
-    for (const d of brandDeals) {
-      try {
-        const comms = await getDealComments(d.id);
-        localDealCommentsSum += comms.length;
-      } catch {
-        // ignore
-      }
-    }
-
-    // 4. Fetch Real Interactions (Impressions, Clicks, etc.)
     let interactionViews = 0;
     let interactionClicks = 0;
-    let rawInteractions: any[] = [];
-
-    if (dealIds.length > 0) {
-      try {
-        const { data, error } = await (supabase.from('interactions') as any)
-          .select('type, deal_id, created_at')
-          .in('deal_id', dealIds);
-
-        if (!error && Array.isArray(data)) {
-          rawInteractions = data;
-          for (const item of data) {
-            if (item.type === 'view') interactionViews++;
-            if (item.type === 'click') interactionClicks++;
-          }
-        }
-      } catch {
-        // offline
-      }
+    const rawInteractions: any[] = Array.isArray(supabaseInteractionsRes) ? supabaseInteractionsRes : [];
+    for (const item of rawInteractions) {
+      if (item.type === 'view') interactionViews++;
+      if (item.type === 'click') interactionClicks++;
     }
 
-    // 5. Fetch Daily Analytics Rollups from analytics_daily
-    let dailyRows: AnalyticsDaily[] = [];
-    if (brandId) {
-      try {
-        const { data, error } = await supabase
-          .from('analytics_daily')
-          .select('*')
-          .eq('brand_id', brandId);
-
-        if (!error && Array.isArray(data)) {
-          dailyRows = data as AnalyticsDaily[];
-        }
-      } catch {
-        // offline
-      }
-    }
-
-    // Aggregate daily rows
+    const dailyRows: AnalyticsDaily[] = Array.isArray(dailyRowsData) ? dailyRowsData : [];
     let rolledViews = 0;
     let rolledClicks = 0;
     for (const r of dailyRows) {
@@ -214,31 +224,31 @@ export async function fetchBrandLiveAnalytics(
       rolledClicks += r.clicks_count || 0;
     }
 
-    // Also factor in local activities
-    const allActivities = await getAllActivities();
+    // Filter local activities
     const brandActivities = allActivities.filter((a) => {
       if (brandId && a.brand_id === brandId) return true;
       if (dealIds.includes(a.deal_id)) return true;
       const bName = (a.brand_name || '').toLowerCase().trim();
-      if (cleanBrandName && bName && (bName.includes(cleanBrandName) || cleanBrandName.includes(bName))) return true;
+      if (cleanBrandName && bName && (bName.includes(cleanBrandName) || cleanBrandName.includes(bName)))
+        return true;
       return false;
     });
 
-    const finalLikes = Math.max(totalLikes, localDealLikesSum);
-    const finalComments = Math.max(totalComments, localDealCommentsSum);
+    const finalLikes = Math.max(totalLikesRemote, localDealLikesSum);
+    const finalComments = Math.max(totalCommentsRemote, localDealCommentsSum);
     const finalImpressions = Math.max(interactionViews, rolledViews);
-    const finalClicks = Math.max(interactionClicks, rolledClicks);
+    const finalClicks = Math.max(interactionClicks, rolledClicks, localDealClicksSum);
 
-    const ctrVal = finalImpressions > 0 ? ((finalClicks / finalImpressions) * 100).toFixed(1) : '0.0';
+    const ctrVal =
+      finalImpressions > 0 ? ((finalClicks / finalImpressions) * 100).toFixed(1) : '0.0';
 
-    // 6. Compute 7 Days Real Activity Distribution
+    // 4. Compute 7 Days Real Activity Distribution
     const last7Days: DailyActivityPoint[] = emptyDays.map((day) => {
       let v = 0;
       let c = 0;
       let l = 0;
       let comm = 0;
 
-      // Check daily rows
       for (const r of dailyRows) {
         if (r.date === day.date) {
           v += r.views_count || 0;
@@ -247,7 +257,6 @@ export async function fetchBrandLiveAnalytics(
         }
       }
 
-      // Check raw interactions
       for (const it of rawInteractions) {
         if (it.created_at && it.created_at.startsWith(day.date)) {
           if (it.type === 'view') v++;
@@ -256,12 +265,15 @@ export async function fetchBrandLiveAnalytics(
         }
       }
 
-      // Check local activities
       for (const act of brandActivities) {
         if (act.created_at && act.created_at.startsWith(day.date)) {
           if (act.type === 'like') l++;
           if (act.type === 'comment') comm++;
         }
+      }
+
+      if (day.date === today.toISOString().split('T')[0] && c < localDealClicksSum) {
+        c = Math.max(c, localDealClicksSum);
       }
 
       const total = v + c + l + comm;
@@ -275,7 +287,7 @@ export async function fetchBrandLiveAnalytics(
       };
     });
 
-    return {
+    const result: BrandAnalyticsData = {
       metrics: {
         totalActivePosts,
         totalImpressions: finalImpressions,
@@ -283,9 +295,17 @@ export async function fetchBrandLiveAnalytics(
         totalComments: finalComments,
         totalClicks: finalClicks,
         ctr: `${ctrVal}%`,
+        totalAttributedOrders: salesSummary.totalOrders,
+        totalSalesRevenue: salesSummary.totalRevenue,
       },
       last7Days,
+      attributedOrders,
     };
+
+    // Store in RAM cache
+    memoryBrandAnalyticsCache.set(cacheKey, { data: result, ts: Date.now() });
+
+    return result;
   } catch (err) {
     console.error('[BrandAnalytics] Error computing live analytics:', err);
     return {
@@ -296,6 +316,8 @@ export async function fetchBrandLiveAnalytics(
         totalComments: 0,
         totalClicks: 0,
         ctr: '0.0%',
+        totalAttributedOrders: 0,
+        totalSalesRevenue: 0,
       },
       last7Days: emptyDays,
     };

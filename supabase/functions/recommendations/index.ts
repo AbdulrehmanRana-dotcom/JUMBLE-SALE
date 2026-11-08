@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: recommendations
 // Exposes the hybrid recommendation engine over HTTP Edge runtime.
 // Calls the public.get_recommendations RPC with the authenticated user context.

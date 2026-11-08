@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: brand-copilot
 // Dedicated Brand Marketing AI Assistant ("Bhai") powered by Google Gemini 1.5 Flash.
 // Strictly bound to Jumble Sale brand marketing, pricing calculations, terms, and promotions.

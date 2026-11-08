@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -17,12 +17,15 @@ import {
 } from 'react-native';
 
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { CategoryChip } from '@/components/ui/CategoryChip';
 import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FilterModal, FilterState } from '@/components/ui/FilterModal';
 import { Input } from '@/components/ui/Input';
 import { DealCardSkeleton } from '@/components/ui/Skeleton';
+import { ShareDealModal, type ShareDealData } from '@/components/ui/ShareDealModal';
 import { useToast } from '@/components/ui/Toast';
 import {
   getLikedDealIds,
@@ -32,10 +35,12 @@ import {
   toggleDealLike,
   toggleDealSave,
 } from '@/lib/activityStore';
-import { getLocalBrands } from '@/lib/brandStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
+import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
+import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
+import { getLocalBrandDeals, isDealActive } from '@/lib/dealStore';
 import { interactionLogger } from '@/lib/interactionLogger';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onHomeTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import type { Category, Deal, RecommendationDeal } from '@/types/database.types';
 import { colors, radii, spacing, typography } from '@/theme';
@@ -52,13 +57,27 @@ const DEFAULT_FILTERS: FilterState = {
 export default function ConsumerHomeScreen() {
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [activeShareDeal, setActiveShareDeal] = useState<ShareDealData | null>(null);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+
+  const flatListRef = useRef<FlatList>(null);
+
+  // Instagram-style: Tapping Home in bottom nav scrolls feed back to top
+  useEffect(() => {
+    const unsubscribe = onHomeTabReset(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    });
+    return unsubscribe;
+  }, []);
 
   // Real user likes query from Supabase + local store
   const { data: likedDealIds = [], refetch: refetchLikedIds } = useQuery<string[]>({
@@ -78,46 +97,79 @@ export default function ConsumerHomeScreen() {
     staleTime: 10 * 1000,
   });
 
-  // Fetch Categories
-  const { data: categories = [] } = useQuery<Category[]>({
+  // Fetch Categories (Instant 0ms local fallback + 800ms remote check)
+  const { data: categories = DEFAULT_CATEGORIES } = useQuery<Category[]>({
     queryKey: ['categories'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      return data ?? [];
+      const cats = await getLocalCategories();
+      return Array.isArray(cats) && cats.length > 0 ? cats : DEFAULT_CATEGORIES;
     },
-    staleTime: 5 * 60 * 1000,
+    initialData: DEFAULT_CATEGORIES,
+    staleTime: 10 * 60 * 1000,
   });
 
-  // Fetch Featured Deals (top 5 active deals from Supabase)
+  // Fetch Featured Deals (across all categories)
   const { data: featuredDeals = [] } = useQuery<any[]>({
     queryKey: ['featured-deals'],
     queryFn: async () => {
-      try {
-        const { data, error } = await (supabase as any).rpc('get_active_deals', {
-          p_limit: 5,
-          p_offset: 0,
-        });
-
-        if (!error && Array.isArray(data) && data.length > 0) return data;
-      } catch {
-        // fallback to direct query
-      }
-
-      const { data } = await supabase
-        .from('deals')
-        .select('*, brand:brands(*), category:categories(*)')
-        .eq('status', 'active')
-        .order('discount_pct', { ascending: false })
-        .limit(5);
-
-      return data ?? [];
+      const localDeals = await getLocalBrandDeals();
+      return localDeals.filter(isDealActive);
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  const selectedCategoryObj = useMemo(
+    () => categories.find((c) => c.id === selectedCategory),
+    [categories, selectedCategory]
+  );
+  const selectedCategoryName = selectedCategoryObj?.name;
+
+  const isDealInCategory = (d: any, targetCatId: string | null): boolean => {
+    if (!targetCatId) return true;
+    if (d.category_id === targetCatId) return true;
+    const cat = categories.find((c) => c.id === targetCatId);
+    if (!cat) return false;
+    const catNameLower = cat.name.toLowerCase();
+    const dealCategoryName = (
+      d.category?.name ||
+      d.category_name ||
+      d.brand?.category ||
+      ''
+    ).toLowerCase();
+    if (dealCategoryName && (dealCategoryName.includes(catNameLower) || catNameLower.includes(dealCategoryName))) {
+      return true;
+    }
+    // Also check brand matching for common retail categories
+    if (catNameLower.includes('footwear') || catNameLower.includes('shoes')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('bata') || /shoes|sneaker|footwear/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('electronic') || catNameLower.includes('mobile')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('priceoye') || /phone|mobile|redmi|earbud/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('food') || catNameLower.includes('dining')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('cheezious') || /pizza|burger|wings|combo/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('beauty') || catNameLower.includes('cosmetic')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('saeed') || /rose water|skincare|oil|herbal/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('grocery') || catNameLower.includes('supermarket')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('imtiaz') || /grocery|bachat|oil|ration/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('home') || catNameLower.includes('living')) {
+      return Boolean(d.brand_name?.toLowerCase().includes('habitt') || /bed|linen|pillow|decor/i.test(d.title || ''));
+    }
+    if (catNameLower.includes('fashion') || catNameLower.includes('apparel')) {
+      return Boolean(/lawn|kurti|suit|streetwear|unstitched|khaadi|outfitters|gul ahmed/i.test(`${d.brand_name} ${d.title}`));
+    }
+    return false;
+  };
+
+  const categoryFeaturedDeals = useMemo(() => {
+    if (!selectedCategory) {
+      return featuredDeals.slice(0, 6);
+    }
+    return featuredDeals.filter((d) => isDealInCategory(d, selectedCategory));
+  }, [featuredDeals, selectedCategory, categories]);
 
   // Fetch AI Recommendations via get_recommendations RPC
   const { data: recommendations = [], isLoading: isLoadingRecs } = useQuery<
@@ -137,14 +189,18 @@ export default function ConsumerHomeScreen() {
         console.warn('[Home recommendations] RPC error:', error.message);
         const localDeals = await getLocalBrandDeals();
         const localBrands = await getLocalBrands();
-        const activeLocal = localDeals.filter((d) => d.status === 'active').slice(0, 6);
+        const activeLocal = localDeals.filter(isDealActive).slice(0, 6);
         return activeLocal.map((d) => {
-          const brandMatch = localBrands.find((b) => b.id === d.brand_id);
+          const brandMatch =
+            (d as any).brand && (d as any).brand.name !== 'Featured Brand'
+              ? (d as any).brand
+              : localBrands.find((b) => b.id === d.brand_id) || KHAADI_BRAND;
           return {
             ...d,
-            brand_name: brandMatch?.name || 'Featured Brand',
+            brand: brandMatch,
+            brand_name: brandMatch?.name || 'Khaadi',
             brand_logo: brandMatch?.logo_url || null,
-            category_name: 'Retail',
+            category_name: brandMatch?.category || 'Fashion & Apparel',
             recommendation_score: 0.85,
             recommendation_reason: 'Trending deal in Pakistan',
           };
@@ -170,18 +226,71 @@ export default function ConsumerHomeScreen() {
     queryFn: async ({ pageParam = 0 }) => {
       const localDeals = await getLocalBrandDeals();
       const localBrands = await getLocalBrands();
-      const activeLocal = localDeals.filter((d) => d.status === 'active').map((d) => {
-        const brandMatch = localBrands.find((b) => b.id === d.brand_id);
+      const activeLocal = localDeals.filter(isDealActive).map((d) => {
+        const brandMatch =
+          (d as any).brand && (d as any).brand.name !== 'Featured Brand'
+            ? (d as any).brand
+            : localBrands.find((b) => b.id === d.brand_id) || KHAADI_BRAND;
         return {
           ...d,
-          brand: (d as any).brand || brandMatch || {
-            id: d.brand_id,
-            name: 'Featured Brand',
-            category: 'Fashion & Apparel',
-            logo_url: null,
-          },
+          brand: brandMatch,
+          brand_name: brandMatch.name,
         };
       });
+
+      // Filter local deals according to user preferences (City, Deal Type, Discount, Search, Sort)
+      let filteredLocal = [...activeLocal];
+
+      if (selectedCategory) {
+        filteredLocal = filteredLocal.filter((d) => isDealInCategory(d, selectedCategory));
+      }
+
+      if (filters.city) {
+        filteredLocal = filteredLocal.filter(
+          (d) =>
+            !d.city ||
+            d.city.toLowerCase() === 'all pakistan' ||
+            d.city.toLowerCase() === filters.city!.toLowerCase()
+        );
+      }
+
+      if (filters.dealType !== 'all') {
+        filteredLocal = filteredLocal.filter((d) => d.deal_type === filters.dealType);
+      }
+
+      if (filters.minDiscount > 0) {
+        filteredLocal = filteredLocal.filter((d) => (d.discount_pct || 0) >= filters.minDiscount);
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        filteredLocal = filteredLocal.filter(
+          (d) =>
+            d.title.toLowerCase().includes(q) ||
+            d.description?.toLowerCase().includes(q) ||
+            (d as any).brand?.name?.toLowerCase().includes(q)
+        );
+      }
+
+      if (filters.sortBy === 'discount_desc') {
+        filteredLocal.sort((a, b) => (b.discount_pct || 0) - (a.discount_pct || 0));
+      } else if (filters.sortBy === 'ending_soon') {
+        filteredLocal.sort((a, b) => {
+          const tA = a.end_date ? new Date(a.end_date).getTime() : 9999999999999;
+          const tB = b.end_date ? new Date(b.end_date).getTime() : 9999999999999;
+          return tA - tB;
+        });
+      } else {
+        filteredLocal.sort((a, b) => {
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return tB - tA;
+        });
+      }
+
+      if (!isSupabaseConfigured) {
+        return filteredLocal as Deal[];
+      }
 
       try {
         let query = supabase
@@ -194,7 +303,7 @@ export default function ConsumerHomeScreen() {
         }
 
         if (filters.city) {
-          query = query.eq('city', filters.city);
+          query = query.in('city', [filters.city, 'All Pakistan']);
         }
 
         if (filters.dealType !== 'all') {
@@ -221,14 +330,15 @@ export default function ConsumerHomeScreen() {
 
         const { data: resultData, error } = await query;
         if (!error && resultData && resultData.length > 0) {
-          return resultData as Deal[];
+          const liveDeals = (resultData as Deal[]).filter(isDealActive);
+          return liveDeals;
         }
         if (pageParam === 0 && (!resultData || resultData.length === 0)) {
-          return activeLocal as Deal[];
+          return filteredLocal as Deal[];
         }
-        return (resultData as Deal[]) ?? [];
+        return [];
       } catch {
-        return activeLocal as Deal[];
+        return filteredLocal as Deal[];
       }
     },
     getNextPageParam: (lastPage, allPages) => {
@@ -242,7 +352,7 @@ export default function ConsumerHomeScreen() {
   const deals = data?.pages.flatMap((page) => page) ?? [];
 
   const handleCardPress = (deal: Deal | any) => {
-    interactionLogger.logInteraction(deal.id, 'click', user?.id);
+    interactionLogger.logInteraction(deal.id, 'view', user?.id);
     recordDealView(deal);
     router.push(`/(consumer)/deal/${deal.id}` as any);
   };
@@ -279,44 +389,29 @@ export default function ConsumerHomeScreen() {
         toast.show('Removed from saved collection', 'info');
       }
       refetchSavedIds();
+      queryClient.invalidateQueries({ queryKey: ['user-saved-deal-ids'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-saved-count'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-deals-list'] });
     } catch {
       toast.show('Could not update saved status', 'error');
     }
   };
 
-  const handleShare = async (deal: Deal | any) => {
-    try {
-      const commenterName = user?.email ? user.email.split('@')[0] : 'Shopper';
-      const userId = user?.id || 'guest';
-      await recordDealShare(
-        deal.id,
-        userId,
-        commenterName,
-        deal.title,
-        deal.brand_id || deal.brand?.id
-      );
-
-      if (Platform.OS === 'web') {
-        if (typeof navigator !== 'undefined' && navigator.clipboard) {
-          const shareUrl =
-            typeof window !== 'undefined'
-              ? `${window.location.origin}/deal/${deal.id}`
-              : `https://jumblesale.app/deal/${deal.id}`;
-          await navigator.clipboard.writeText(shareUrl);
-          toast.show('Deal link copied to clipboard! 🔗', 'success');
-        } else {
-          toast.show('Deal shared! 🔗', 'success');
-        }
-      } else {
-        await Share.share({
-          title: deal.title,
-          message: `Check out this discount on Jumble Sale: ${deal.title} (${deal.discount_pct}% OFF)!`,
-        });
-        toast.show('Deal shared! 🔗', 'success');
-      }
-    } catch {
-      toast.show('Deal link copied! 🔗', 'info');
-    }
+  const handleShare = (deal: Deal | any) => {
+    if (!deal) return;
+    setActiveShareDeal({
+      id: deal.id,
+      title: deal.title,
+      discount_pct: deal.discount_pct,
+      promo_code: deal.promo_code,
+      brand_name: deal.brand?.name || deal.brand_name || 'Brand Partner',
+      brand_logo: deal.brand?.logo_url || deal.brand_logo || null,
+      image_url: deal.image_url || deal.image_urls?.[0] || null,
+      price: deal.price,
+      original_price: deal.original_price,
+      brand_id: deal.brand_id || deal.brand?.id,
+    });
+    setShareModalOpen(true);
   };
 
   const formatExpiryLabel = (dateStr?: string) => {
@@ -343,16 +438,17 @@ export default function ConsumerHomeScreen() {
             <Ionicons name="search-outline" size={20} color="#FFFFFF" />
           </Pressable>
 
-          <Pressable
+          <NotificationBell
+            role="consumer"
+            userId={user?.id}
+            onPress={() => setNotificationsModalOpen(true)}
             style={styles.iconSquareBtn}
-            onPress={() => router.push('/(consumer)/notifications' as any)}>
-            <Ionicons name="notifications-outline" size={20} color="#FFFFFF" />
-            <View style={styles.notificationDot} />
-          </Pressable>
+          />
         </View>
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={deals}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
@@ -422,18 +518,22 @@ export default function ConsumerHomeScreen() {
             </ScrollView>
 
             {/* Featured Carousel Section */}
-            {featuredDeals.length > 0 && !searchQuery && (
+            {categoryFeaturedDeals.length > 0 && !searchQuery && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>🔥 Featured Sales in Pakistan</Text>
+                <Text style={styles.sectionTitle}>
+                  {selectedCategoryName
+                    ? `🔥 Featured in ${selectedCategoryName}`
+                    : '🔥 Featured Sales in Pakistan'}
+                </Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.featuredRow}>
-                  {featuredDeals.map((item) => (
+                  {categoryFeaturedDeals.map((item) => (
                     <View key={item.id} style={styles.featuredCardWrap}>
                       <DealCard
                         title={item.title}
-                        brandName={item.brand_name || item.brand?.name || 'Featured Brand'}
+                        brandName={item.brand_name || item.brand?.name || 'Khaadi'}
                         brandLogo={item.brand?.logo_url || item.brand_logo}
                         discountLabel={`${item.discount_pct}% OFF`}
                         price={(item as any).price || (item as any).discount_price || null}
@@ -454,8 +554,8 @@ export default function ConsumerHomeScreen() {
               </View>
             )}
 
-            {/* Live AI Recommendation Section */}
-            {!searchQuery && (
+            {/* Live AI Recommendation Section (Shown on All Promotions feed) */}
+            {!selectedCategory && !searchQuery && (
               <View style={styles.section}>
                 <View style={styles.aiSectionHeader}>
                   <View style={styles.aiTitleRow}>
@@ -506,7 +606,7 @@ export default function ConsumerHomeScreen() {
 
                         <DealCard
                           title={item.title}
-                          brandName={item.brand_name || 'Featured Brand'}
+                          brandName={item.brand_name || 'Khaadi'}
                           brandLogo={item.brand_logo}
                           discountLabel={`${item.discount_pct}% OFF`}
                           price={(item as any).price || (item as any).discount_price || null}
@@ -542,7 +642,7 @@ export default function ConsumerHomeScreen() {
             )}
 
             <Text style={[styles.sectionTitle, { marginTop: spacing[2] }]}>
-              {selectedCategory ? 'Category Deals' : 'All Active Promotions'}
+              {selectedCategoryName ? `${selectedCategoryName} Deals` : 'All Active Promotions'}
             </Text>
           </View>
         }
@@ -555,10 +655,18 @@ export default function ConsumerHomeScreen() {
             </View>
           ) : (
             <EmptyState
-              title="No Deals Available Right Now"
-              description="No deals available right now. Check back later!"
+              title={
+                selectedCategoryName
+                  ? `No Deals in ${selectedCategoryName}`
+                  : 'No Deals Available Right Now'
+              }
+              description={
+                selectedCategoryName
+                  ? `There are currently no active promotions in ${selectedCategoryName}. Explore another category or view all active deals.`
+                  : 'No deals available right now. Check back later!'
+              }
               icon="pricetag-outline"
-              actionLabel="Reset Filters"
+              actionLabel="View All Deals"
               onAction={() => {
                 setSearchQuery('');
                 setSelectedCategory(null);
@@ -581,7 +689,7 @@ export default function ConsumerHomeScreen() {
             <View style={styles.dealItemContainer}>
               <DealCard
                 title={item.title}
-                brandName={item.brand?.name || 'Featured Brand'}
+                brandName={item.brand?.name || item.brand_name || 'Khaadi'}
                 brandLogo={item.brand?.logo_url}
                 discountLabel={`${item.discount_pct}% OFF`}
                 price={(item as any).price || (item as any).discount_price || null}
@@ -614,6 +722,21 @@ export default function ConsumerHomeScreen() {
       <AuthRequiredModal
         visible={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
+      />
+
+      {/* In-App Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        role="consumer"
+        userId={user?.id}
+      />
+
+      {/* Social Deal Share Modal */}
+      <ShareDealModal
+        visible={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        deal={activeShareDeal}
       />
     </SafeAreaView>
   );

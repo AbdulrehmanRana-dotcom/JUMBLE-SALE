@@ -25,6 +25,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { useToast } from '@/components/ui/Toast';
 import {
   approveBrand,
@@ -53,6 +55,23 @@ import type {
   Report,
 } from '@/types/database.types';
 import { radii, spacing, typography } from '@/theme';
+import {
+  fetchRegisteredBrandsList,
+  fetchBrandDetailedIntelligence,
+  fetchRegisteredShoppersList,
+  fetchUserDetailedIntelligence,
+  fetchAppActivityOverview,
+  type AdminBrandItem,
+  type AdminUserItem,
+  type BrandDetailedIntelligence,
+  type UserDetailedIntelligence,
+  type AppActivityMetrics,
+} from '@/lib/adminAnalytics';
+import { AdminBrandsSection } from '@/components/admin/AdminBrandsSection';
+import { BrandDetailDrawer } from '@/components/admin/BrandDetailDrawer';
+import { AdminUsersSection } from '@/components/admin/AdminUsersSection';
+import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
+import { AdminAppActivitySection } from '@/components/admin/AdminAppActivitySection';
 
 // ─── NEON GREEN & BLACK THEME PALETTE ─────────────────────────────
 const adminTheme = {
@@ -81,12 +100,14 @@ const adminTheme = {
 };
 
 type AdminTab =
+  | 'brands'
+  | 'users'
+  | 'activity_monitoring'
   | 'overview'
   | 'directory'
-  | 'activity_monitoring'
+  | 'management'
   | 'brands_queue'
   | 'deals_queue'
-  | 'management'
   | 'reports'
   | 'audit_log';
 
@@ -107,11 +128,22 @@ export default function AdminDashboardScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 900;
 
-  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>('brands');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [managementSubTab, setManagementSubTab] = useState<'users' | 'brands'>('users');
   const [reportsFilter, setReportsFilter] = useState<'all' | 'pending' | 'resolved' | 'dismissed'>('pending');
+
+  // Brand Deep-Dive Drawer State
+  const [selectedBrandIntelligence, setSelectedBrandIntelligence] = useState<BrandDetailedIntelligence | null>(null);
+  const [loadingBrandIntelligence, setLoadingBrandIntelligence] = useState(false);
+  const [brandDrawerVisible, setBrandDrawerVisible] = useState(false);
+
+  // User Deep-Dive Drawer State
+  const [selectedUserIntelligence, setSelectedUserIntelligence] = useState<UserDetailedIntelligence | null>(null);
+  const [loadingUserIntelligence, setLoadingUserIntelligence] = useState(false);
+  const [userDrawerVisible, setUserDrawerVisible] = useState(false);
 
   // Reason Modal State
   const [reasonModalVisible, setReasonModalVisible] = useState(false);
@@ -130,12 +162,72 @@ export default function AdminDashboardScreen() {
   // Overview quick toggle
   const [overviewFeedMode, setOverviewFeedMode] = useState<'logs' | 'activities'>('logs');
 
+  // Instagram-style navigation reset function (backs out of all open inspection drawers & dialogs to first page)
+  const handleTabResetOrSwitch = (targetTab: AdminTab) => {
+    // 1. Close any open deep-dive drawers or inspection views
+    setBrandDrawerVisible(false);
+    setUserDrawerVisible(false);
+    setSelectedBrandIntelligence(null);
+    setSelectedUserIntelligence(null);
+    setSelectedDirectoryBrand(null);
+    setReasonModalVisible(false);
+    setNotificationsModalOpen(false);
+    setMobileSidebarOpen(false);
+
+    // 2. Reset search and sub-tab filters
+    setSearchQuery('');
+    setManagementSubTab('users');
+    setReportsFilter('pending');
+
+    // 3. Switch to selected tab
+    setActiveTab(targetTab);
+  };
+
   // ─── 1. Stats Query (Pure SQL COUNT(*) from Database, No Dummy Fallbacks) ──
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<AdminStats>({
     queryKey: ['admin-stats'],
     queryFn: async () => {
       return await fetchAdminStats();
     },
+  });
+
+  // ─── Pure DB Registered Brands Monitoring Query ───────────────────
+  const {
+    data: registeredBrands = [],
+    isLoading: loadingRegisteredBrands,
+    refetch: refetchRegisteredBrands,
+  } = useQuery<AdminBrandItem[]>({
+    queryKey: ['admin-registered-brands'],
+    queryFn: async () => {
+      return await fetchRegisteredBrandsList();
+    },
+    enabled: activeTab === 'brands' || activeTab === 'directory' || activeTab === 'overview',
+  });
+
+  // ─── Pure DB Registered Shoppers Monitoring Query ─────────────────
+  const {
+    data: registeredShoppers = [],
+    isLoading: loadingRegisteredShoppers,
+    refetch: refetchRegisteredShoppers,
+  } = useQuery<AdminUserItem[]>({
+    queryKey: ['admin-registered-shoppers'],
+    queryFn: async () => {
+      return await fetchRegisteredShoppersList();
+    },
+    enabled: activeTab === 'users' || activeTab === 'management' || activeTab === 'overview',
+  });
+
+  // ─── Pure DB App System Activity Overview Query ───────────────────
+  const {
+    data: appActivityMetrics,
+    isLoading: loadingAppActivity,
+    refetch: refetchAppActivity,
+  } = useQuery<AppActivityMetrics>({
+    queryKey: ['admin-app-activity-metrics'],
+    queryFn: async () => {
+      return await fetchAppActivityOverview();
+    },
+    enabled: activeTab === 'activity_monitoring' || activeTab === 'overview',
   });
 
   // ─── 2. Pending Brands Queue Query ────────────────────────────────
@@ -353,6 +445,32 @@ export default function AdminDashboardScreen() {
       console.warn('[Admin] Load brand deals notice:', e);
     } finally {
       setLoadingDirectoryDeals(false);
+    }
+  };
+
+  const handleInspectBrand = async (brand: AdminBrandItem | Brand) => {
+    setBrandDrawerVisible(true);
+    setLoadingBrandIntelligence(true);
+    try {
+      const intel = await fetchBrandDetailedIntelligence(brand.id, brand.name);
+      setSelectedBrandIntelligence(intel);
+    } catch (err: any) {
+      toast.show(err.message || 'Failed to load brand data', 'error');
+    } finally {
+      setLoadingBrandIntelligence(false);
+    }
+  };
+
+  const handleInspectUser = async (targetUser: AdminUserItem | Profile) => {
+    setUserDrawerVisible(true);
+    setLoadingUserIntelligence(true);
+    try {
+      const intel = await fetchUserDetailedIntelligence(targetUser.id);
+      setSelectedUserIntelligence(intel);
+    } catch (err: any) {
+      toast.show(err.message || 'Failed to load user activity', 'error');
+    } finally {
+      setLoadingUserIntelligence(false);
     }
   };
 
@@ -2173,10 +2291,7 @@ export default function AdminDashboardScreen() {
           icon="grid"
           label="Overview"
           active={activeTab === 'overview'}
-          onPress={() => {
-            setActiveTab('overview');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('overview')}
         />
 
         {/* Section: MODERATION QUEUES */}
@@ -2187,10 +2302,7 @@ export default function AdminDashboardScreen() {
           count={stats?.pendingBrands}
           urgent={Boolean(stats && stats.pendingBrands > 0)}
           active={activeTab === 'brands_queue'}
-          onPress={() => {
-            setActiveTab('brands_queue');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('brands_queue')}
         />
         <SidebarNavItem
           icon="pricetag"
@@ -2198,10 +2310,7 @@ export default function AdminDashboardScreen() {
           count={stats?.pendingDeals}
           urgent={Boolean(stats && stats.pendingDeals > 0)}
           active={activeTab === 'deals_queue'}
-          onPress={() => {
-            setActiveTab('deals_queue');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('deals_queue')}
         />
         <SidebarNavItem
           icon="flag"
@@ -2209,53 +2318,39 @@ export default function AdminDashboardScreen() {
           count={stats?.pendingReports}
           urgent={Boolean(stats && stats.pendingReports > 0)}
           active={activeTab === 'reports'}
-          onPress={() => {
-            setActiveTab('reports');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('reports')}
         />
 
-        {/* Section: MANAGEMENT */}
-        <Text style={styles.sidebarSectionTitle}>MANAGEMENT</Text>
+        {/* Section: CORE MONITORING */}
+        <Text style={styles.sidebarSectionTitle}>CORE MONITORING</Text>
         <SidebarNavItem
-          icon="albums"
-          label="Brand Directory"
-          count={allBrands.length}
-          active={activeTab === 'directory'}
-          onPress={() => {
-            setActiveTab('directory');
-            setMobileSidebarOpen(false);
-          }}
+          icon="business"
+          label="Brands Monitoring"
+          count={registeredBrands.length}
+          active={activeTab === 'brands' || activeTab === 'directory'}
+          onPress={() => handleTabResetOrSwitch('brands')}
         />
         <SidebarNavItem
           icon="people"
-          label="Users & Brands"
-          active={activeTab === 'management'}
-          onPress={() => {
-            setActiveTab('management');
-            setMobileSidebarOpen(false);
-          }}
+          label="Users Monitoring"
+          count={registeredShoppers.length}
+          active={activeTab === 'users' || activeTab === 'management'}
+          onPress={() => handleTabResetOrSwitch('users')}
         />
-
-        {/* Section: MONITORING */}
-        <Text style={styles.sidebarSectionTitle}>MONITORING & LOGS</Text>
         <SidebarNavItem
           icon="pulse"
-          label="Activity Tracking"
+          label="App Activity & Usage"
           active={activeTab === 'activity_monitoring'}
-          onPress={() => {
-            setActiveTab('activity_monitoring');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('activity_monitoring')}
         />
+
+        {/* Section: SYSTEM */}
+        <Text style={styles.sidebarSectionTitle}>SYSTEM & LOGS</Text>
         <SidebarNavItem
           icon="newspaper"
           label="Audit Log"
           active={activeTab === 'audit_log'}
-          onPress={() => {
-            setActiveTab('audit_log');
-            setMobileSidebarOpen(false);
-          }}
+          onPress={() => handleTabResetOrSwitch('audit_log')}
         />
       </ScrollView>
 
@@ -2344,21 +2439,14 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.statusChipText}>Live</Text>
               </View>
 
-              {/* Notification icon with count badge */}
-              <Pressable
+              {/* Notification Bell with Dynamic Unread Badge */}
+              <NotificationBell
+                role="admin"
+                userId="admin"
+                onPress={() => setNotificationsModalOpen(true)}
                 style={styles.headerIconButton}
-                onPress={() => {
-                  if ((stats?.pendingBrands ?? 0) > 0) setActiveTab('brands_queue');
-                  else if ((stats?.pendingDeals ?? 0) > 0) setActiveTab('deals_queue');
-                  else setActiveTab('reports');
-                }}>
-                <Ionicons name="notifications-outline" size={20} color={adminTheme.textSecondary} />
-                {totalModerationTasks > 0 && (
-                  <View style={styles.notificationDot}>
-                    <Text style={styles.notificationDotText}>{totalModerationTasks}</Text>
-                  </View>
-                )}
-              </Pressable>
+                iconColor={adminTheme.textSecondary}
+              />
 
               {/* User Avatar Chip */}
               <View style={styles.headerProfileChip}>
@@ -2382,67 +2470,93 @@ export default function AdminDashboardScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.quickNavScroll}>
               <QuickNavBtn
+                label="Brands"
+                icon="business-outline"
+                count={registeredBrands.length}
+                active={activeTab === 'brands' || activeTab === 'directory'}
+                onPress={() => handleTabResetOrSwitch('brands')}
+              />
+              <QuickNavBtn
+                label="Users"
+                icon="people-outline"
+                count={registeredShoppers.length}
+                active={activeTab === 'users' || activeTab === 'management'}
+                onPress={() => handleTabResetOrSwitch('users')}
+              />
+              <QuickNavBtn
+                label="App Activity"
+                icon="pulse-outline"
+                active={activeTab === 'activity_monitoring'}
+                onPress={() => handleTabResetOrSwitch('activity_monitoring')}
+              />
+              <QuickNavBtn
                 label="Overview"
                 icon="grid-outline"
                 active={activeTab === 'overview'}
-                onPress={() => setActiveTab('overview')}
+                onPress={() => handleTabResetOrSwitch('overview')}
               />
               <QuickNavBtn
                 label="Brands Queue"
-                icon="business-outline"
+                icon="time-outline"
                 count={stats?.pendingBrands}
                 active={activeTab === 'brands_queue'}
-                onPress={() => setActiveTab('brands_queue')}
+                onPress={() => handleTabResetOrSwitch('brands_queue')}
               />
               <QuickNavBtn
                 label="Deals Queue"
                 icon="pricetag-outline"
                 count={stats?.pendingDeals}
                 active={activeTab === 'deals_queue'}
-                onPress={() => setActiveTab('deals_queue')}
-              />
-              <QuickNavBtn
-                label="Directory"
-                icon="albums-outline"
-                active={activeTab === 'directory'}
-                onPress={() => setActiveTab('directory')}
-              />
-              <QuickNavBtn
-                label="Management"
-                icon="people-outline"
-                active={activeTab === 'management'}
-                onPress={() => setActiveTab('management')}
-              />
-              <QuickNavBtn
-                label="Activity"
-                icon="pulse-outline"
-                active={activeTab === 'activity_monitoring'}
-                onPress={() => setActiveTab('activity_monitoring')}
+                onPress={() => handleTabResetOrSwitch('deals_queue')}
               />
               <QuickNavBtn
                 label="Reports"
                 icon="flag-outline"
                 count={stats?.pendingReports}
                 active={activeTab === 'reports'}
-                onPress={() => setActiveTab('reports')}
+                onPress={() => handleTabResetOrSwitch('reports')}
               />
               <QuickNavBtn
                 label="Audit Trail"
                 icon="newspaper-outline"
                 active={activeTab === 'audit_log'}
-                onPress={() => setActiveTab('audit_log')}
+                onPress={() => handleTabResetOrSwitch('audit_log')}
               />
             </ScrollView>
           </View>
 
           {/* Screen Body */}
           <View style={{ flex: 1 }}>
+            {(activeTab === 'brands' || activeTab === 'directory') && (
+              <AdminBrandsSection
+                brands={registeredBrands}
+                loading={loadingRegisteredBrands}
+                onRefresh={refetchRegisteredBrands}
+                onSelectBrand={handleInspectBrand}
+                onToggleBrandSuspension={handleToggleBrandSuspension}
+                onDeleteBrand={handleDeleteBrand}
+              />
+            )}
+            {(activeTab === 'users' || activeTab === 'management') && (
+              <AdminUsersSection
+                users={registeredShoppers}
+                loading={loadingRegisteredShoppers}
+                onRefresh={refetchRegisteredShoppers}
+                onSelectUser={handleInspectUser}
+                onToggleUserSuspension={handleToggleUserSuspension}
+                onDeleteUser={handleDeleteUser}
+              />
+            )}
+            {activeTab === 'activity_monitoring' && (
+              <AdminAppActivitySection
+                metrics={appActivityMetrics ?? null}
+                loading={loadingAppActivity}
+                onRefresh={refetchAppActivity}
+              />
+            )}
             {activeTab === 'overview' && renderOverview()}
-            {activeTab === 'directory' && renderBrandDirectory()}
-            {activeTab === 'activity_monitoring' && renderActivityMonitoring()}
             {activeTab === 'brands_queue' && renderBrandsQueue()}
             {activeTab === 'deals_queue' && renderDealsQueue()}
-            {activeTab === 'management' && renderManagement()}
             {activeTab === 'reports' && renderReports()}
             {activeTab === 'audit_log' && renderAuditLog()}
           </View>
@@ -2525,6 +2639,128 @@ export default function AdminDashboardScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Brand Detailed Intelligence Drawer */}
+      <BrandDetailDrawer
+        visible={brandDrawerVisible}
+        data={selectedBrandIntelligence}
+        loading={loadingBrandIntelligence}
+        onClose={() => setBrandDrawerVisible(false)}
+        onToggleDealStatus={async (deal) => {
+          await handleToggleDealStatus(deal);
+          if (selectedBrandIntelligence) {
+            handleInspectBrand(selectedBrandIntelligence.brand);
+          }
+        }}
+        onDeleteDeal={async (deal) => {
+          handleDeletePost(deal);
+          if (selectedBrandIntelligence) {
+            handleInspectBrand(selectedBrandIntelligence.brand);
+          }
+        }}
+        onToggleBrandSuspension={async (brand) => {
+          await handleToggleBrandSuspension(brand);
+          if (selectedBrandIntelligence) {
+            handleInspectBrand(brand);
+          }
+        }}
+      />
+
+      {/* User Detailed Intelligence Drawer */}
+      <UserDetailDrawer
+        visible={userDrawerVisible}
+        data={selectedUserIntelligence}
+        loading={loadingUserIntelligence}
+        onClose={() => setUserDrawerVisible(false)}
+        onToggleUserSuspension={async (targetUser) => {
+          handleToggleUserSuspension(targetUser);
+          if (selectedUserIntelligence) {
+            handleInspectUser(targetUser);
+          }
+        }}
+      />
+
+      {/* In-App Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        role="admin"
+        userId="admin"
+        onAdminNavigate={(tab) => {
+          if (['brands', 'brands_queue', 'deals_queue', 'reports', 'overview', 'audit_log'].includes(tab)) {
+            handleTabResetOrSwitch(tab as any);
+          }
+        }}
+      />
+
+      {/* ─── MOBILE BOTTOM NAVIGATION BAR (Instagram-style Tab Navigation & Back) ─── */}
+      {!isDesktop && (
+        <View style={styles.adminBottomNav}>
+          {[
+            {
+              id: 'brands' as AdminTab,
+              label: 'Brands',
+              icon: 'business',
+              iconOutline: 'business-outline',
+            },
+            {
+              id: 'users' as AdminTab,
+              label: 'Users',
+              icon: 'people',
+              iconOutline: 'people-outline',
+            },
+            {
+              id: 'brands_queue' as AdminTab,
+              label: 'Queues',
+              icon: 'hourglass',
+              iconOutline: 'hourglass-outline',
+              badge: (stats?.pendingBrands || 0) + (stats?.pendingDeals || 0),
+            },
+            {
+              id: 'activity_monitoring' as AdminTab,
+              label: 'Activity',
+              icon: 'pulse',
+              iconOutline: 'pulse-outline',
+            },
+            {
+              id: 'overview' as AdminTab,
+              label: 'Overview',
+              icon: 'grid',
+              iconOutline: 'grid-outline',
+            },
+          ].map((tabItem) => {
+            const isTabActive = activeTab === tabItem.id;
+            return (
+              <Pressable
+                key={tabItem.id}
+                style={styles.adminBottomNavItem}
+                onPress={() => handleTabResetOrSwitch(tabItem.id)}>
+                <View style={{ position: 'relative' }}>
+                  <Ionicons
+                    name={(isTabActive ? tabItem.icon : tabItem.iconOutline) as any}
+                    size={22}
+                    color={isTabActive ? adminTheme.neon : adminTheme.textMuted}
+                  />
+                  {Boolean(typeof tabItem.badge === 'number' && tabItem.badge > 0) && (
+                    <View style={styles.navBadge}>
+                      <Text style={styles.navBadgeText}>
+                        {(tabItem.badge ?? 0) > 99 ? '99+' : tabItem.badge}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.adminBottomNavText,
+                    isTabActive && styles.adminBottomNavTextActive,
+                  ]}>
+                  {tabItem.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -2708,6 +2944,51 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: adminTheme.bgApp,
+  },
+  adminBottomNav: {
+    height: 60,
+    backgroundColor: adminTheme.bgSidebar,
+    borderTopWidth: 1,
+    borderTopColor: adminTheme.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingHorizontal: spacing[2],
+  },
+  adminBottomNavItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+  adminBottomNavText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '600',
+    color: adminTheme.textMuted,
+    marginTop: 2,
+  },
+  adminBottomNavTextActive: {
+    color: adminTheme.neon,
+    fontWeight: '800',
+  },
+  navBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -10,
+    backgroundColor: adminTheme.error,
+    borderRadius: radii.full,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    minWidth: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navBadgeText: {
+    ...typography.caption,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   layoutRoot: {
     flex: 1,

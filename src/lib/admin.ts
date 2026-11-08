@@ -4,6 +4,7 @@ import {
   updateLocalBrandStatus,
 } from '@/lib/brandStore';
 import { getLocalBrandDeals, saveLocalDeal } from '@/lib/dealStore';
+import { createNotification } from '@/lib/notificationStore';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -178,13 +179,16 @@ export async function approveBrand(brandId: string, brandName: string) {
 
     // Notify brand owner
     const { data: b } = await (supabase.from('brands') as any).select('owner_id').eq('id', brandId).maybeSingle();
-    if (b?.owner_id) {
-      await (supabase.from('notifications') as any).insert({
-        user_id: b.owner_id,
-        title: 'Brand Partner Approved! 🎉',
-        body: `Congratulations! "${brandName}" has been verified and approved. You can now post live promotions.`,
-      });
-    }
+    await createNotification({
+      user_id: b?.owner_id || 'brand',
+      role: 'brand',
+      category: 'system',
+      title: 'Brand Partner Approved! 🎉',
+      body: `Congratulations! "${brandName}" has been verified and approved. You can now post live promotions.`,
+      brand_id: brandId,
+      action_url: '/(brand)',
+      is_read: false,
+    });
   } catch (err: any) {
     console.warn('[Admin] Supabase approveBrand error (handled via local state):', err?.message);
   }
@@ -233,13 +237,16 @@ export async function rejectBrand(
 
     // Notify brand owner
     const { data: b } = await (supabase.from('brands') as any).select('owner_id').eq('id', brandId).maybeSingle();
-    if (b?.owner_id) {
-      await (supabase.from('notifications') as any).insert({
-        user_id: b.owner_id,
-        title: 'Brand Application Status Update',
-        body: `Your brand application for "${brandName}" was not approved. Reason: ${cleanReason}`,
-      });
-    }
+    await createNotification({
+      user_id: b?.owner_id || 'brand',
+      role: 'brand',
+      category: 'system',
+      title: 'Brand Application Status Update',
+      body: `Your brand application for "${brandName}" was not approved. Reason: ${cleanReason}`,
+      brand_id: brandId,
+      action_url: '/(brand)/pending',
+      is_read: false,
+    });
   } catch (err: any) {
     console.warn('[Admin] Supabase rejectBrand error (handled via local state):', err?.message);
   }
@@ -448,14 +455,16 @@ export async function approveDeal(dealId: string, title: string) {
     details: { title },
   });
 
-  if (deal?.brand?.owner_id) {
-    await (supabase.from('notifications') as any).insert({
-      user_id: deal.brand.owner_id,
-      title: 'Promotion Approved! 🚀',
-      body: `Your deal "${title}" is now live on the marketplace.`,
-      deal_id: dealId,
-    });
-  }
+  await createNotification({
+    user_id: deal?.brand?.owner_id || 'brand',
+    role: 'brand',
+    category: 'deal',
+    title: 'Promotion Approved! 🚀',
+    body: `Your deal "${title}" is now live on the marketplace.`,
+    deal_id: dealId,
+    action_url: `/(consumer)/deal/${dealId}`,
+    is_read: false,
+  });
 
   return { success: true };
 }
@@ -510,14 +519,16 @@ export async function rejectDeal(
     details: { title, reason: cleanReason },
   });
 
-  if (deal?.brand?.owner_id) {
-    await (supabase.from('notifications') as any).insert({
-      user_id: deal.brand.owner_id,
-      title: 'Promotion Rejected',
-      body: `Your deal "${title}" was not approved. Reason: ${cleanReason}`,
-      deal_id: dealId,
-    });
-  }
+  await createNotification({
+    user_id: deal?.brand?.owner_id || 'brand',
+    role: 'brand',
+    category: 'deal',
+    title: 'Promotion Rejected',
+    body: `Your deal "${title}" was not approved. Reason: ${cleanReason}`,
+    deal_id: dealId,
+    action_url: '/(brand)',
+    is_read: false,
+  });
 
   return { success: true };
 }

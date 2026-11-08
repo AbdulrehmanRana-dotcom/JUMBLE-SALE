@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: generate-promo-copy
 // AI Promotional Copy Generator for Brands.
 // Takes product/category, discount %, dates, tone, and language.

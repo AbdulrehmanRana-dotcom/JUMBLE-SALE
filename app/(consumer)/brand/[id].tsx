@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Image,
+  Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -19,9 +20,16 @@ import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/ui/Header';
 import { useToast } from '@/components/ui/Toast';
-import { getLocalBrands } from '@/lib/brandStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
-import { supabase } from '@/lib/supabase';
+import {
+  getLikedDealIds,
+  getSavedDealIds,
+  toggleDealLike,
+  toggleDealSave,
+} from '@/lib/activityStore';
+import { getLocalBrands, KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND } from '@/lib/brandStore';
+import { getLocalBrandDeals, isDealActive } from '@/lib/dealStore';
+import { isBrandFollowed, toggleFollowBrand } from '@/lib/followStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import type { Brand, Deal } from '@/types/database.types';
 import { colors, radii, spacing, typography } from '@/theme';
@@ -30,9 +38,11 @@ export default function BrandProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user, isGuest } = useAuth();
 
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [isFollowed, setIsFollowed] = useState<boolean>(false);
 
   // Fetch Brand Info & Follow Status
   const {
@@ -44,84 +54,154 @@ export default function BrandProfileScreen() {
     queryFn: async () => {
       if (!id) throw new Error('Missing brand ID');
 
-      let brandData: any = null;
+      const localBrands = await getLocalBrands();
+      const localMatch =
+        localBrands.find((b) => b.id === id) ||
+        localBrands.find((b) => (b.name || '').toLowerCase() === (id || '').toLowerCase()) ||
+        (id === KHAADI_BRAND.id || id?.toLowerCase().includes('khaadi') ? KHAADI_BRAND : null) ||
+        (id === OUTFITTERS_BRAND.id || id?.toLowerCase().includes('outfit') ? OUTFITTERS_BRAND : null) ||
+        (id === GUL_AHMED_BRAND.id || id?.toLowerCase().includes('ahmed') ? GUL_AHMED_BRAND : null) ||
+        localBrands[0] ||
+        KHAADI_BRAND;
 
-      try {
-        const { data, error } = await supabase
-          .from('brands')
-          .select('*')
-          .eq('id', id)
-          .maybeSingle();
+      let brandData: any = localMatch;
 
-        if (!error && data) {
-          brandData = data;
+      if (isSupabaseConfigured) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 800)
+          );
+          const queryPromise = supabase
+            .from('brands')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+
+          const res: any = await Promise.race([queryPromise, timeoutPromise]);
+          if (res?.data) {
+            brandData = res.data;
+          }
+        } catch (err) {
+          console.warn('[BrandProfile] Supabase query notice:', err);
         }
-      } catch (err) {
-        console.warn('[BrandProfile] Supabase query notice:', err);
-      }
-
-      // Local store fallback
-      if (!brandData) {
-        const localBrands = await getLocalBrands();
-        brandData = localBrands.find((b) => b.id === id);
       }
 
       if (!brandData) {
-        throw new Error('Brand not found');
+        brandData = KHAADI_BRAND;
       }
 
       if (user?.id) {
         try {
-          const { data: followData } = await supabase
-            .from('follows')
-            .select('user_id')
-            .eq('user_id', user.id)
-            .eq('brand_id', id)
-            .maybeSingle();
-
-          brandData.is_followed = Boolean(followData);
-        } catch {}
+          const followed = await isBrandFollowed(brandData.id || id, user.id);
+          brandData.is_followed = followed;
+        } catch {
+          brandData.is_followed = false;
+        }
       }
 
       return brandData;
     },
     enabled: Boolean(id),
+    staleTime: 2 * 60 * 1000,
   });
 
-  // Fetch Active Deals for this Brand
+  // Keep isFollowed state synchronized with brand query
+  useEffect(() => {
+    if (brand && typeof brand.is_followed === 'boolean') {
+      setIsFollowed(brand.is_followed);
+    }
+  }, [brand]);
+
+  // Fetch Active Deals for this Brand (Fast local-first with 800ms race timeout)
   const { data: brandDeals = [], isLoading: loadingDeals } = useQuery<Deal[]>({
     queryKey: ['brand-active-deals', id],
     queryFn: async () => {
       if (!id) return [];
-      let dealsList: Deal[] = [];
+      const localDeals = await getLocalBrandDeals(id);
+      const activeLocal = localDeals.filter(isDealActive);
+
+      if (!isSupabaseConfigured) {
+        return activeLocal;
+      }
 
       try {
-        const { data, error } = await supabase
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 800)
+        );
+        const queryPromise = supabase
           .from('deals')
           .select('*')
           .eq('brand_id', id)
           .eq('status', 'active')
           .order('created_at', { ascending: false });
 
-        if (!error && data) {
-          dealsList = data as Deal[];
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          const liveDeals = (res.data as Deal[]).filter(isDealActive);
+          return liveDeals;
         }
       } catch {}
 
-      // Fallback & merge local deals
-      const localDeals = await getLocalBrandDeals(id);
-      const activeLocal = localDeals.filter((d) => d.status === 'active');
-      const merged = [...dealsList];
-      for (const ld of activeLocal) {
-        if (!merged.some((m) => m.id === ld.id)) {
-          merged.push(ld);
-        }
-      }
-
-      return merged;
+      return activeLocal;
     },
     enabled: Boolean(id),
+    staleTime: 2 * 60 * 1000,
   });
+
+  // Fetch Saved Deal IDs
+  const { data: savedDealIds = [], refetch: refetchSavedIds } = useQuery<string[]>({
+    queryKey: ['user-saved-deal-ids', user?.id || 'guest'],
+    queryFn: () => getSavedDealIds(user?.id || 'guest'),
+    staleTime: 0,
+  });
+
+  // Fetch Liked Deal IDs
+  const { data: likedDealIds = [], refetch: refetchLikedIds } = useQuery<string[]>({
+    queryKey: ['user-liked-deal-ids', user?.id || 'guest'],
+    queryFn: () => getLikedDealIds(user?.id || 'guest'),
+    staleTime: 0,
+  });
+
+  const handleToggleSaveDeal = async (deal: Deal) => {
+    try {
+      const effectiveUserId = user?.id || 'guest';
+      const res = await toggleDealSave(deal.id, effectiveUserId);
+      if (res.isSaved) {
+        toast.show('Saved to your collection! 📌', 'success');
+      } else {
+        toast.show('Removed from saved collection', 'info');
+      }
+      refetchSavedIds();
+      queryClient.invalidateQueries({ queryKey: ['user-saved-deal-ids'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-saved-count'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-deals-list'] });
+    } catch {
+      toast.show('Could not update saved status', 'error');
+    }
+  };
+
+  const handleToggleLikeDeal = async (deal: Deal) => {
+    try {
+      const effectiveUserId = user?.id || 'guest';
+      const commenterName = user?.email ? user.email.split('@')[0] : 'Shopper';
+      const res = await toggleDealLike(
+        deal.id,
+        effectiveUserId,
+        commenterName,
+        deal.title,
+        deal.brand_id
+      );
+      if (res.isLiked) {
+        toast.show('Liked deal! ❤️', 'success');
+      } else {
+        toast.show('Removed like', 'info');
+      }
+      refetchLikedIds();
+      queryClient.invalidateQueries({ queryKey: ['user-liked-deal-ids'] });
+    } catch {
+      toast.show('Could not update like', 'error');
+    }
+  };
 
   const handleToggleFollow = async () => {
     if (isGuest || !user?.id) {
@@ -131,24 +211,26 @@ export default function BrandProfileScreen() {
 
     if (!brand) return;
 
+    // Optimistic instant toggle (0ms latency Instagram feel)
+    const prev = isFollowed;
+    const nextState = !prev;
+    setIsFollowed(nextState);
+
+    if (nextState) {
+      toast.show(`Now following ${brand.name}!`, 'success');
+    } else {
+      toast.show(`Unfollowed ${brand.name}`, 'info');
+    }
+
     try {
-      if (brand.is_followed) {
-        await supabase
-          .from('follows')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('brand_id', brand.id);
-        toast.show(`Unfollowed ${brand.name}`, 'info');
-      } else {
-        await (supabase.from('follows') as any).insert({
-          user_id: user.id,
-          brand_id: brand.id,
-        });
-        toast.show(`Now following ${brand.name}! Notifications enabled.`, 'success');
-      }
-      refetchBrand();
+      await toggleFollowBrand(brand.id, user.id);
+      queryClient.invalidateQueries({ queryKey: ['followed-brands-list'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-brands-count'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-profile', id] });
     } catch (err: any) {
-      toast.show(err.message, 'error');
+      // Revert if persistent failure
+      setIsFollowed(prev);
+      toast.show(err.message || 'Action failed', 'error');
     }
   };
 
@@ -208,13 +290,24 @@ export default function BrandProfileScreen() {
                 </View>
               )}
 
-              <Button
-                label={brand.is_followed ? 'Following' : '+ Follow Brand'}
-                variant={brand.is_followed ? 'outline' : 'primary'}
-                fullWidth
-                onPress={handleToggleFollow}
-                style={{ marginTop: spacing[2] }}
-              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isFollowed ? 'Unfollow brand' : 'Follow brand'}
+                style={({ pressed }) => [
+                  styles.followBtn,
+                  isFollowed ? styles.followingBtn : styles.followBtnActive,
+                  pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
+                ]}
+                onPress={handleToggleFollow}>
+                <Ionicons
+                  name={isFollowed ? 'checkmark-sharp' : 'person-add'}
+                  size={16}
+                  color={isFollowed ? colors.primary : '#0D1117'}
+                />
+                <Text style={isFollowed ? styles.followingBtnText : styles.followBtnActiveText}>
+                  {isFollowed ? 'Following' : 'Follow'}
+                </Text>
+              </Pressable>
             </View>
 
             <Text style={styles.sectionHeader}>
@@ -238,11 +331,16 @@ export default function BrandProfileScreen() {
             <DealCard
               title={item.title}
               brandName={brand.name}
+              brandLogo={brand.logo_url}
               discountLabel={`${item.discount_pct}% OFF`}
               price={(item as any).price || (item as any).discount_price || null}
               originalPrice={(item as any).original_price || null}
               imageUri={item.image_urls?.[0]}
               expiresLabel={`Ends ${new Date(item.end_date).toLocaleDateString()}`}
+              saved={savedDealIds.includes(item.id)}
+              liked={likedDealIds.includes(item.id)}
+              onToggleSave={() => handleToggleSaveDeal(item)}
+              onToggleLike={() => handleToggleLikeDeal(item)}
               onPress={() => router.push(`/(consumer)/deal/${item.id}` as any)}
             />
           </View>
@@ -328,5 +426,36 @@ const styles = StyleSheet.create({
     ...typography.label,
     color: colors.textPrimary,
     marginTop: spacing[2],
+  },
+  followBtn: {
+    width: '100%',
+    height: 46,
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: spacing[2],
+  },
+  followBtnActive: {
+    backgroundColor: colors.primary,
+    borderWidth: 0,
+  },
+  followBtnActiveText: {
+    ...typography.button,
+    color: '#0D1117',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  followingBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  followingBtnText: {
+    ...typography.button,
+    color: colors.textPrimary,
+    fontWeight: '600',
+    fontSize: 15,
   },
 });

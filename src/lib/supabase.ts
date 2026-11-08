@@ -3,16 +3,31 @@ import { createClient } from '@supabase/supabase-js';
 
 import type { Database } from '@/types/database.types';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const fallbackUrl = 'https://ajbxviddoiipcxtovxxu.supabase.co';
+const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy_anon_key';
+
+const rawUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
+const rawKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+const supabaseUrl = rawUrl || fallbackUrl;
+const supabaseAnonKey = rawKey || fallbackKey;
 
 if (typeof WebSocket === 'undefined' && typeof window === 'undefined') {
   (globalThis as any).WebSocket = class DummyWebSocket {};
 }
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn(
-    '[supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY. Copy .env.example to .env.',
+export const isSupabaseConfigured = Boolean(
+  rawUrl &&
+  !rawUrl.includes('ajbxviddoiipcxtovxxu') &&
+  !rawUrl.includes('placeholder') &&
+  rawKey &&
+  !rawKey.includes('dummy') &&
+  !rawKey.includes('your_supabase')
+);
+
+if (!isSupabaseConfigured) {
+  console.info(
+    '[supabase] Running with local/mock credentials. To connect to a live Supabase backend, set valid EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env.',
   );
 }
 

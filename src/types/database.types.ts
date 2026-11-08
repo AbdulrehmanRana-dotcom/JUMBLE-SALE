@@ -1,8 +1,8 @@
 export type UserRole = 'consumer' | 'brand' | 'admin';
 export type BrandStatus = 'pending' | 'active' | 'suspended' | 'rejected';
 export type DealType = 'online' | 'in_store';
-export type DealStatus = 'draft' | 'pending' | 'active' | 'rejected' | 'expired' | 'suspended';
-export type InteractionType = 'view' | 'click' | 'save' | 'like' | 'report';
+export type DealStatus = 'draft' | 'pending' | 'active' | 'rejected' | 'expired' | 'suspended' | 'paused';
+export type InteractionType = 'view' | 'click' | 'save' | 'like' | 'report' | 'share';
 export type ReportStatus = 'pending' | 'resolved' | 'dismissed';
 
 export interface Profile {
@@ -68,8 +68,10 @@ export interface Deal {
   created_at: string;
   updated_at: string;
 
-  // Joined fields
-  brand?: Brand & Profile;
+  // Joined & Extended fields
+  is_pinned?: boolean;
+  brand?: (Brand & Partial<Profile>) | any;
+  brand_name?: string;
   category?: Category;
   is_saved?: boolean;
   is_liked?: boolean;

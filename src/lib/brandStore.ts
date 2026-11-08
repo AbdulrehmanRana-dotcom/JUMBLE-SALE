@@ -6,8 +6,8 @@ import {
   getDealSharesCount,
   getRecentlyViewedDeals,
 } from '@/lib/activityStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
-import { supabase } from '@/lib/supabase';
+import { createNotification } from '@/lib/notificationStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import type { Brand, Deal } from '@/types/database.types';
 
 const PENDING_BRANDS_KEY = '@jumble_sale_pending_brands';
@@ -63,9 +63,115 @@ export const GUL_AHMED_BRAND: Brand = {
   created_at: new Date().toISOString(),
 };
 
+export const BATA_BRAND: Brand = {
+  id: 'b4444444-4444-4444-4444-444444444444',
+  owner_id: 'b0000000-0000-0000-0000-000000000004',
+  name: 'Bata Pakistan',
+  business_email: 'care@bata.com.pk',
+  contact_number: '+92 42 111 228 228',
+  category: 'Footwear & Accessories',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=600&q=80',
+  social_links: { website: 'https://www.bata.com.pk' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
+export const PRICEOYE_BRAND: Brand = {
+  id: 'b5555555-5555-5555-5555-555555555555',
+  owner_id: 'b0000000-0000-0000-0000-000000000005',
+  name: 'PriceOye',
+  business_email: 'support@priceoye.pk',
+  contact_number: '+92 51 111 693 693',
+  category: 'Electronics & Mobiles',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600&q=80',
+  social_links: { website: 'https://priceoye.pk' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
+export const CHEEZIOUS_BRAND: Brand = {
+  id: 'b6666666-6666-6666-6666-666666666666',
+  owner_id: 'b0000000-0000-0000-0000-000000000006',
+  name: 'Cheezious',
+  business_email: 'hello@cheezious.com',
+  contact_number: '+92 51 111 446 699',
+  category: 'Food & Dining',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&q=80',
+  social_links: { website: 'https://cheezious.com' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
+export const SAEED_GHANI_BRAND: Brand = {
+  id: 'b7777777-7777-7777-7777-777777777777',
+  owner_id: 'b0000000-0000-0000-0000-000000000007',
+  name: 'Saeed Ghani',
+  business_email: 'support@saeedghani.pk',
+  contact_number: '+92 21 111 723 334',
+  category: 'Beauty & Cosmetics',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600&q=80',
+  social_links: { website: 'https://saeedghani.pk' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
+export const IMTIAZ_BRAND: Brand = {
+  id: 'b8888888-8888-8888-8888-888888888888',
+  owner_id: 'b0000000-0000-0000-0000-000000000008',
+  name: 'Imtiaz Super Market',
+  business_email: 'customercare@imtiaz.com.pk',
+  contact_number: '+92 21 111 468 429',
+  category: 'Grocery & Supermarket',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&q=80',
+  social_links: { website: 'https://www.imtiaz.com.pk' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
+export const HABITT_BRAND: Brand = {
+  id: 'b9999999-9999-9999-9999-999999999999',
+  owner_id: 'b0000000-0000-0000-0000-000000000009',
+  name: 'Habitt',
+  business_email: 'info@habitt.com',
+  contact_number: '+92 21 111 422 488',
+  category: 'Home & Living',
+  status: 'active',
+  is_verified: true,
+  logo_url: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=600&q=80',
+  social_links: { website: 'https://habitt.com' },
+  verification_doc_urls: ['NTN_Verified.pdf'],
+  rejection_reason: null,
+  created_at: new Date().toISOString(),
+};
+
 export const DEFAULT_PARTNER_BRAND: Brand = KHAADI_BRAND;
 
-export const INITIAL_MOCK_BRANDS: Brand[] = [KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND];
+export const INITIAL_MOCK_BRANDS: Brand[] = [
+  KHAADI_BRAND,
+  OUTFITTERS_BRAND,
+  GUL_AHMED_BRAND,
+  BATA_BRAND,
+  PRICEOYE_BRAND,
+  CHEEZIOUS_BRAND,
+  SAEED_GHANI_BRAND,
+  IMTIAZ_BRAND,
+  HABITT_BRAND,
+];
 
 /**
  * Get IDs of brands permanently removed by admin
@@ -89,6 +195,7 @@ export async function deleteLocalBrand(brandId: string): Promise<void> {
       deletedIds.push(brandId);
       await AsyncStorage.setItem(DELETED_BRANDS_KEY, JSON.stringify(deletedIds));
     }
+    invalidateBrandsCache();
 
     const raw = await AsyncStorage.getItem(PENDING_BRANDS_KEY);
     if (raw) {
@@ -101,11 +208,27 @@ export async function deleteLocalBrand(brandId: string): Promise<void> {
   }
 }
 
+let memoryBrandsCache: Brand[] | null = null;
+let lastBrandsCacheTime = 0;
+const BRANDS_CACHE_TTL = 30 * 1000; // 30s fast RAM cache for 0ms tab switching
+
+/**
+ * Invalidate memory brands cache (called when brands are saved or deleted)
+ */
+export function invalidateBrandsCache() {
+  memoryBrandsCache = null;
+  lastBrandsCacheTime = 0;
+}
+
 /**
  * Get all brands stored locally (both submitted and pre-seeded, excluding deleted)
  */
 export async function getLocalBrands(): Promise<Brand[]> {
   try {
+    if (memoryBrandsCache && Date.now() - lastBrandsCacheTime < BRANDS_CACHE_TTL) {
+      return memoryBrandsCache;
+    }
+
     const deletedIds = await getDeletedBrandIds();
     const raw = await AsyncStorage.getItem(PENDING_BRANDS_KEY);
     let brands: Brand[] = [];
@@ -114,26 +237,24 @@ export async function getLocalBrands(): Promise<Brand[]> {
       brands = Array.isArray(parsed) ? parsed : [];
     }
 
-    // Filter out old non-UUID brands and deleted brands
+    // Preserve all valid brands, excluding deleted
     let realBrands = brands.filter(
-      (b) =>
-        b.id &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(b.id) &&
-        !deletedIds.includes(b.id)
+      (b) => b && b.id && typeof b.id === 'string' && b.id.trim().length > 0 && !deletedIds.includes(b.id)
     );
 
-    // Only ensure Khaadi, Outfitters, Gul Ahmed are present if not deleted
+    // Ensure core official partner brands (Khaadi, Outfitters, Gul Ahmed) are present unless explicitly deleted
     for (const seedBrand of [KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND]) {
       if (!deletedIds.includes(seedBrand.id) && !realBrands.some((b) => b.id === seedBrand.id)) {
         realBrands.push(seedBrand);
       }
     }
 
-    await AsyncStorage.setItem(PENDING_BRANDS_KEY, JSON.stringify(realBrands));
+    memoryBrandsCache = realBrands;
+    lastBrandsCacheTime = Date.now();
     return realBrands;
   } catch (err) {
     console.error('[BrandStore] Error loading local brands:', err);
-    return [];
+    return [KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND];
   }
 }
 
@@ -161,6 +282,35 @@ export async function saveBrandRegistrationLocally(brand: Partial<Brand>): Promi
 
     const updated = [newBrand, ...existing.filter((b) => b.id !== newBrand.id && b.name.toLowerCase() !== newBrand.name.toLowerCase())];
     await AsyncStorage.setItem(PENDING_BRANDS_KEY, JSON.stringify(updated));
+    invalidateBrandsCache();
+
+    // Dispatch real notifications for new brand application
+    try {
+      // 1. To Admin
+      await createNotification({
+        role: 'admin',
+        userId: 'admin',
+        brand_id: newBrand.id,
+        category: 'moderation',
+        title: 'New Brand KYC Pending Review 📋',
+        body: `Brand "${newBrand.name}" ne registration aur verification documents submit kiye hain.`,
+        action_url: 'brands_queue',
+      });
+
+      // 2. To Brand Owner
+      await createNotification({
+        role: 'brand',
+        userId: newBrand.owner_id || newBrand.id,
+        brand_id: newBrand.id,
+        category: 'system',
+        title: 'Registration Submitted ⏳',
+        body: `Aapki brand registration "${newBrand.name}" submit ho chuki hai. Admin verification complete hone par verified badge mil jaye ga.`,
+        action_url: '/(brand)/pending',
+      });
+    } catch (notifErr) {
+      console.warn('[BrandStore] Registration notification notice:', notifErr);
+    }
+
     return newBrand;
   } catch (err) {
     console.error('[BrandStore] Error saving brand registration:', err);
@@ -392,6 +542,7 @@ export async function saveBrandIdentityGlobally(brandData: {
         category: brandData.category || 'Fashion & Apparel',
         status: 'active',
         is_verified: true,
+        logo_url: brandData.logo_url || null,
         social_links: identityPayload.social_links,
         updated_at: new Date().toISOString(),
       };
@@ -422,6 +573,7 @@ export async function saveBrandIdentityGlobally(brandData: {
         id: brandData.owner_id,
         display_name: cleanName,
         role: 'brand',
+        avatar_url: brandData.logo_url || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
     } catch (pErr) {
@@ -436,6 +588,7 @@ export async function saveBrandIdentityGlobally(brandData: {
         brand_name: cleanName,
         display_name: cleanName,
         full_name: cleanName,
+        avatar_url: brandData.logo_url || undefined,
       },
     });
   } catch (authErr) {
@@ -493,16 +646,22 @@ export async function getTopEngagedBrands(): Promise<EngagedBrand[]> {
   try {
     // 1. Fetch registered active brands from Supabase and local store
     let registeredBrands: Brand[] = [];
-    try {
-      const { data, error } = await supabase
-        .from('brands')
-        .select('*')
-        .in('status', ['active', 'approved']);
-      if (!error && Array.isArray(data) && data.length > 0) {
-        registeredBrands = data as Brand[];
+    if (isSupabaseConfigured) {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1500)
+        );
+        const queryPromise = supabase
+          .from('brands')
+          .select('*')
+          .in('status', ['active', 'approved']);
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+          registeredBrands = res.data as Brand[];
+        }
+      } catch (err) {
+        console.warn('[BrandStore] Supabase brands query notice:', err);
       }
-    } catch (err) {
-      console.warn('[BrandStore] Supabase brands query notice:', err);
     }
 
     const localBrands = await getLocalBrands();
@@ -527,15 +686,22 @@ export async function getTopEngagedBrands(): Promise<EngagedBrand[]> {
 
     // 2. Fetch all deals (both Supabase and Local)
     let dbDeals: Deal[] = [];
-    try {
-      const { data: dealsData } = await supabase
-        .from('deals')
-        .select('*, brand:brands(*)');
-      if (dealsData && Array.isArray(dealsData)) {
-        dbDeals = dealsData as Deal[];
-      }
-    } catch {}
+    if (isSupabaseConfigured) {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1500)
+        );
+        const queryPromise = supabase
+          .from('deals')
+          .select('*, brand:brands(*)');
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && Array.isArray(res.data)) {
+          dbDeals = res.data as Deal[];
+        }
+      } catch {}
+    }
 
+    const { getLocalBrandDeals } = await import('@/lib/dealStore');
     const localDeals = await getLocalBrandDeals();
     const dealMap = new Map<string, Deal>();
     for (const d of [...dbDeals, ...localDeals]) {
@@ -547,14 +713,20 @@ export async function getTopEngagedBrands(): Promise<EngagedBrand[]> {
 
     // 3. Fetch interaction records (views, clicks)
     let dbInteractions: { deal_id: string; type: string }[] = [];
-    try {
-      const { data: inters } = await supabase
-        .from('interactions')
-        .select('deal_id, type');
-      if (inters && Array.isArray(inters)) {
-        dbInteractions = inters;
-      }
-    } catch {}
+    if (isSupabaseConfigured) {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1500)
+        );
+        const queryPromise = supabase
+          .from('interactions')
+          .select('deal_id, type');
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && Array.isArray(res.data)) {
+          dbInteractions = res.data;
+        }
+      } catch {}
+    }
 
     const localActivities = await getAllActivities();
     const viewedDeals = await getRecentlyViewedDeals();

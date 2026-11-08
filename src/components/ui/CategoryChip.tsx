@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors, typography } from '@/theme';
+import { typography } from '@/theme';
 
 export type CategoryChipProps = {
   label: string;

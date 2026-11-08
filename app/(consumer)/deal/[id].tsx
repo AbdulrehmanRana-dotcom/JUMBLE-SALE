@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -19,8 +20,10 @@ import {
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
+import { InAppBrandBrowserModal } from '@/components/browser/InAppBrandBrowserModal';
 import { Button } from '@/components/ui/Button';
 import { ReportModal } from '@/components/ui/ReportModal';
+import { ShareDealModal } from '@/components/ui/ShareDealModal';
 import { useToast } from '@/components/ui/Toast';
 import {
   addDealComment,
@@ -35,10 +38,11 @@ import {
   toggleDealSave,
   type CommentItem,
 } from '@/lib/activityStore';
-import { getLocalBrands } from '@/lib/brandStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
+import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
+import { recordPostWebsiteClick } from '@/lib/clickTracker';
+import { getDealRemainingDays, getLocalBrandDeals, isDealExpired } from '@/lib/dealStore';
 import { interactionLogger } from '@/lib/interactionLogger';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import type { Deal } from '@/types/database.types';
 import { colors, spacing, typography } from '@/theme';
@@ -47,13 +51,19 @@ export default function DealDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user, profile } = useAuth();
   const [storedDisplayName, setStoredDisplayName] = useState<string | null>(null);
 
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [inAppBrowserOpen, setInAppBrowserOpen] = useState(false);
+  const [browserTargetUrl, setBrowserTargetUrl] = useState('');
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [fullscreenImageIndex, setFullscreenImageIndex] = useState<number | null>(null);
 
   React.useEffect(() => {
     (async () => {
@@ -78,33 +88,39 @@ export default function DealDetailScreen() {
 
       let dealData: any = null;
 
-      try {
-        const { data, error } = await supabase
-          .from('deals')
-          .select('*, brand:brands(*), category:categories(*)')
-          .eq('id', id)
-          .maybeSingle();
-
-        if (!error && data) {
-          dealData = data;
+      // 1. Fast local cache lookup (instant 0ms response)
+      const localDeals = await getLocalBrandDeals();
+      const found = localDeals.find((d) => d.id === id);
+      if (found) {
+        const localBrands = await getLocalBrands();
+        let brandMatch = (found as any).brand;
+        if (!brandMatch || brandMatch.name === 'Featured Brand' || !brandMatch.logo_url) {
+          brandMatch =
+            localBrands.find((b) => b.id === found.brand_id) ||
+            localBrands.find((b) => (b.name || '').toLowerCase() === ((found as any).brand_name || '').toLowerCase()) ||
+            KHAADI_BRAND;
         }
-      } catch (err) {
-        console.warn('[DealDetail] Supabase query notice:', err);
+        dealData = { ...found, brand: brandMatch, brand_name: brandMatch.name };
       }
 
-      // Fallback to local deals if offline
-      if (!dealData) {
-        const localDeals = await getLocalBrandDeals();
-        const found = localDeals.find((d) => d.id === id);
-        if (found) {
-          const localBrands = await getLocalBrands();
-          const brandMatch = localBrands.find((b) => b.id === found.brand_id) || {
-            id: found.brand_id,
-            name: 'KHAADI',
-            category: 'Fashion',
-            logo_url: null,
-          };
-          dealData = { ...found, brand: brandMatch };
+      // 2. Query Supabase only if not found locally and live backend is configured
+      if (!dealData && isSupabaseConfigured) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 1500)
+          );
+          const queryPromise = supabase
+            .from('deals')
+            .select('*, brand:brands(*), category:categories(*)')
+            .eq('id', id)
+            .maybeSingle();
+
+          const res: any = await Promise.race([queryPromise, timeoutPromise]);
+          if (res?.data) {
+            dealData = res.data;
+          }
+        } catch (err) {
+          console.warn('[DealDetail] Supabase query notice:', err);
         }
       }
 
@@ -112,16 +128,17 @@ export default function DealDetailScreen() {
         throw new Error('Deal not found');
       }
 
-      // Check liked status via activityStore and Supabase
+      // Check liked and saved status in parallel
       const effectiveUserId = user?.id || 'guest';
-      const likedIds = await getLikedDealIds(effectiveUserId);
+      const [likedIds, savedIds] = await Promise.all([
+        getLikedDealIds(effectiveUserId),
+        getSavedDealIds(effectiveUserId),
+      ]);
       dealData.is_liked = likedIds.includes(id);
-
-      const savedIds = await getSavedDealIds(effectiveUserId);
       dealData.is_saved = savedIds.includes(id);
 
-      // Record in recently viewed deals
-      recordDealView(dealData);
+      // Record in recently viewed deals (non-blocking)
+      recordDealView(dealData).catch(() => {});
 
       return dealData;
     },
@@ -181,37 +198,19 @@ export default function DealDetailScreen() {
         toast.show('Removed from saved deals', 'info');
       }
       refetch();
+      queryClient.invalidateQueries({ queryKey: ['profile-saved-count'] });
+      queryClient.invalidateQueries({ queryKey: ['saved-deals-list'] });
+      queryClient.invalidateQueries({ queryKey: ['user-saved-deal-ids'] });
     } catch (err: any) {
       toast.show(err.message || 'Could not update saved status', 'error');
     }
   };
 
-  const handleShare = async () => {
-    if (!deal) return;
-    try {
-      const commenterName = user?.email ? user.email.split('@')[0] : 'Shopper';
-      const userId = user?.id || 'guest';
-      await recordDealShare(
-        deal.id,
-        userId,
-        commenterName,
-        deal.title,
-        deal.brand_id
-      );
-
-      if (Platform.OS !== 'web') {
-        await Share.share({
-          title: deal.title,
-          message: `Check out this discount on Jumble Sale: ${deal.title} (${deal.discount_pct}% OFF)!`,
-        });
-      }
-      toast.show('Post link shared successfully! 🔗', 'success');
-    } catch {
-      toast.show('Post link copied!', 'info');
-    }
+  const handleShare = () => {
+    setShareModalOpen(true);
   };
 
-  const handleVisitWebsite = () => {
+  const handleVisitWebsite = async () => {
     if (!deal) return;
 
     const rawUrl =
@@ -231,11 +230,11 @@ export default function DealDetailScreen() {
       targetUrl = `https://${targetUrl}`;
     }
 
-    interactionLogger.logInteraction(deal.id, 'click', user?.id);
+    // Deduplicated click tracking: Only 1st click on this post is counted. 2nd click on same post is ignored.
+    await recordPostWebsiteClick(deal.id, user?.id);
 
-    Linking.openURL(targetUrl).catch(() => {
-      toast.show('Could not open store link', 'error');
-    });
+    setBrowserTargetUrl(targetUrl);
+    setInAppBrowserOpen(true);
   };
 
   const handleAddComment = async () => {
@@ -280,6 +279,35 @@ export default function DealDetailScreen() {
     } finally {
       setCommentSubmitting(false);
     }
+  };
+
+  // Amazon-style Multi-Image Gallery processing (Top-level hooks)
+  const dealImages: string[] = React.useMemo(() => {
+    if (!deal) return [];
+    const list: string[] = [];
+    if (deal.image_urls && Array.isArray(deal.image_urls)) {
+      deal.image_urls.forEach((u) => {
+        if (u && typeof u === 'string' && u.trim() && !list.includes(u.trim())) {
+          list.push(u.trim());
+        }
+      });
+    }
+    if (deal.banner_url && typeof deal.banner_url === 'string' && !list.includes(deal.banner_url.trim())) {
+      list.push(deal.banner_url.trim());
+    }
+    return list;
+  }, [deal]);
+
+  const activeImageUri = dealImages[selectedImageIndex] || dealImages[0] || null;
+
+  const handlePrevImage = () => {
+    if (dealImages.length <= 1) return;
+    setSelectedImageIndex((prev) => (prev > 0 ? prev - 1 : dealImages.length - 1));
+  };
+
+  const handleNextImage = () => {
+    if (dealImages.length <= 1) return;
+    setSelectedImageIndex((prev) => (prev < dealImages.length - 1 ? prev + 1 : 0));
   };
 
   if (isLoading) {
@@ -337,6 +365,9 @@ export default function DealDetailScreen() {
     ? new Date(deal.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : 'Limited Time';
 
+  const isEnded = isDealExpired(deal);
+  const daysLeft = getDealRemainingDays(deal);
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -345,12 +376,142 @@ export default function DealDetailScreen() {
           <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
         </Pressable>
         <Text style={styles.headerTitle}>Deal Details</Text>
-        <View style={{ width: 40 }} />
+        <Pressable
+          onPress={() => setShareModalOpen(true)}
+          style={styles.shareHeaderBtn}
+          hitSlop={8}
+          accessibilityLabel="Share deal">
+          <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Deal Expired Banner */}
+        {isEnded && (
+          <View style={styles.expiredBanner}>
+            <View style={styles.expiredIconBox}>
+              <Ionicons name="time" size={18} color="#EF4444" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.expiredBannerTitle}>Sale Ended</Text>
+              <Text style={styles.expiredBannerDesc}>
+                This promotion expired on {endDateStr} and is no longer active.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Amazon-Style Multi-Image Product Gallery */}
+        <View style={styles.galleryWrap}>
+          {/* Main Hero Image */}
+          <View style={styles.heroImageCard}>
+            {activeImageUri ? (
+              <Pressable
+                onPress={() => setFullscreenImageIndex(selectedImageIndex)}
+                style={styles.heroImagePressable}
+                accessibilityRole="button"
+                accessibilityLabel="View full size image">
+                <Image
+                  source={{ uri: activeImageUri }}
+                  style={styles.heroImage}
+                  contentFit="cover"
+                  transition={250}
+                />
+              </Pressable>
+            ) : (
+              <View style={styles.noImagePlaceholder}>
+                <Ionicons name="image-outline" size={48} color="#64748B" />
+                <Text style={styles.noImageText}>Product Photo</Text>
+              </View>
+            )}
+
+            {/* Discount Badge Overlay (Top Left) */}
+            {Boolean(deal.discount_pct) && (
+              <View style={styles.galleryDiscountBadge}>
+                <Text style={styles.galleryDiscountText}>{deal.discount_pct}% OFF</Text>
+              </View>
+            )}
+
+            {/* Image Counter Pill (Top Right, Amazon-style) */}
+            {dealImages.length > 1 && (
+              <View style={styles.galleryCounterPill}>
+                <Ionicons name="images-outline" size={13} color="#FFFFFF" />
+                <Text style={styles.galleryCounterText}>
+                  {selectedImageIndex + 1} / {dealImages.length}
+                </Text>
+              </View>
+            )}
+
+            {/* Tap to expand hint (Bottom Right) */}
+            {activeImageUri && (
+              <Pressable
+                style={styles.expandIconBtn}
+                onPress={() => setFullscreenImageIndex(selectedImageIndex)}
+                hitSlop={8}>
+                <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
+              </Pressable>
+            )}
+
+            {/* Left / Right Arrow Controls (Visible if multiple images) */}
+            {dealImages.length > 1 && (
+              <>
+                <Pressable
+                  style={[styles.arrowBtn, styles.arrowBtnLeft]}
+                  onPress={handlePrevImage}
+                  hitSlop={8}
+                  accessibilityLabel="Previous image">
+                  <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+                </Pressable>
+
+                <Pressable
+                  style={[styles.arrowBtn, styles.arrowBtnRight]}
+                  onPress={handleNextImage}
+                  hitSlop={8}
+                  accessibilityLabel="Next image">
+                  <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
+                </Pressable>
+              </>
+            )}
+          </View>
+
+          {/* Amazon-Style Horizontal Thumbnail Strip (Below Hero) */}
+          {dealImages.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.thumbnailRow}>
+              {dealImages.map((uri, idx) => {
+                const isSelected = selectedImageIndex === idx;
+                return (
+                  <Pressable
+                    key={uri + idx}
+                    onPress={() => setSelectedImageIndex(idx)}
+                    style={[
+                      styles.thumbnailBox,
+                      isSelected && styles.thumbnailBoxSelected,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select photo ${idx + 1}`}>
+                    <Image
+                      source={{ uri }}
+                      style={styles.thumbnailImg}
+                      contentFit="cover"
+                      transition={150}
+                    />
+                    {isSelected && (
+                      <View style={styles.thumbnailActiveIndicator} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+
         {/* Deal Title */}
-        <Text style={styles.dealTitle}>{deal.title}</Text>
+        <Text style={styles.dealTitle}>
+          {(deal.title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim()}
+        </Text>
 
         {/* Category Badge Pill */}
         <View style={styles.categoryPill}>
@@ -451,12 +612,18 @@ export default function DealDetailScreen() {
           {/* Item 3: Available At */}
           <View style={styles.infoRowCard}>
             <View style={styles.infoIconBox}>
-              <Ionicons name="storefront-outline" size={20} color="#00FF66" />
+              <Ionicons
+                name={deal.deal_type === 'in_store' ? 'storefront-outline' : 'globe-outline'}
+                size={20}
+                color="#00FF66"
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoRowLabel}>AVAILABLE AT</Text>
+              <Text style={styles.infoRowLabel}>LOCATION & AVAILABILITY</Text>
               <Text style={styles.infoRowValue}>
-                {deal.city ? `${deal.city} Stores & Online` : 'All Nationwide Stores & Online'}
+                {deal.city && deal.city !== 'All Pakistan'
+                  ? `${deal.city} (${deal.deal_type === 'in_store' ? 'In-Store Outlets' : 'Online Delivery'})`
+                  : `All Pakistan (${deal.deal_type === 'in_store' ? 'All Retail Branches' : 'Nationwide Online'})`}
               </Text>
             </View>
           </View>
@@ -623,9 +790,17 @@ export default function DealDetailScreen() {
         </Pressable>
 
         {/* Buy on Brand Website Button */}
-        <Pressable style={styles.visitBtn} onPress={handleVisitWebsite}>
-          <Text style={styles.visitBtnText}>Buy on Brand Website</Text>
-          <Ionicons name="open-outline" size={18} color="#090A0E" />
+        <Pressable
+          style={[styles.visitBtn, isEnded && styles.visitBtnEnded]}
+          onPress={handleVisitWebsite}>
+          <Text style={[styles.visitBtnText, isEnded && styles.visitBtnTextEnded]}>
+            {isEnded ? 'Sale Ended • Visit Site' : 'Buy on Brand Website'}
+          </Text>
+          <Ionicons
+            name="open-outline"
+            size={18}
+            color={isEnded ? '#EF4444' : '#090A0E'}
+          />
         </Pressable>
       </View>
 
@@ -639,6 +814,103 @@ export default function DealDetailScreen() {
         dealId={deal.id}
         onClose={() => setReportModalOpen(false)}
       />
+
+      {/* In-App Browser Companion & Purchase Claim */}
+      <InAppBrandBrowserModal
+        visible={inAppBrowserOpen}
+        url={browserTargetUrl}
+        dealId={deal.id}
+        dealTitle={deal.title}
+        brandId={deal.brand_id}
+        brandName={(deal as any)?.brand?.name || (deal as any)?.brand_name || 'Khaadi'}
+        brandLogo={(deal as any)?.brand?.logo_url}
+        userId={user?.id}
+        userName={storedDisplayName || profile?.display_name || user?.email?.split('@')[0] || 'Shopper'}
+        estimatedPrice={deal.discount_price || deal.original_price}
+        onClose={() => setInAppBrowserOpen(false)}
+        onOrderClaimed={(order) => {
+          toast.show(`Order saved! Rs. ${order.order_amount.toLocaleString()} added to your history`, 'success');
+        }}
+      />
+
+      {/* Social Deal Share Modal */}
+      <ShareDealModal
+        visible={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        deal={
+          deal
+            ? {
+                id: deal.id,
+                title: deal.title,
+                discount_pct: deal.discount_pct,
+                promo_code: deal.promo_code,
+                brand_name: (deal as any)?.brand?.name || (deal as any)?.brand_name || 'Khaadi',
+                brand_logo: (deal as any)?.brand?.logo_url,
+                image_url: (deal as any)?.image_url || (deal as any)?.image_urls?.[0],
+                price: (deal as any)?.price || deal.discount_price,
+                original_price: deal.original_price,
+                brand_id: deal.brand_id,
+              }
+            : null
+        }
+      />
+
+      {/* Fullscreen Image Lightbox Modal */}
+      {fullscreenImageIndex !== null && Boolean(activeImageUri) && (
+        <Modal
+          visible={fullscreenImageIndex !== null}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setFullscreenImageIndex(null)}>
+          <View style={styles.lightboxBackdrop}>
+            {/* Top Bar with Close & Counter */}
+            <SafeAreaView style={styles.lightboxTopBar}>
+              <View style={styles.lightboxCounter}>
+                <Text style={styles.lightboxCounterText}>
+                  {selectedImageIndex + 1} / {dealImages.length}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.lightboxCloseBtn}
+                onPress={() => setFullscreenImageIndex(null)}
+                hitSlop={12}>
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </Pressable>
+            </SafeAreaView>
+
+            {/* Centered High-Res Image */}
+            <View style={styles.lightboxImageWrap}>
+              <Image
+                source={{ uri: dealImages[selectedImageIndex] }}
+                style={styles.lightboxImage}
+                contentFit="contain"
+              />
+            </View>
+
+            {/* Bottom Thumbnail Selector in Lightbox */}
+            {dealImages.length > 1 && (
+              <View style={styles.lightboxBottomBar}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.lightboxThumbRow}>
+                  {dealImages.map((uri, idx) => (
+                    <Pressable
+                      key={uri + idx}
+                      onPress={() => setSelectedImageIndex(idx)}
+                      style={[
+                        styles.lightboxThumb,
+                        selectedImageIndex === idx && styles.lightboxThumbActive,
+                      ]}>
+                      <Image source={{ uri }} style={styles.lightboxThumbImg} contentFit="cover" />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -663,6 +935,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  shareHeaderBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
   headerTitle: {
     ...typography.h3,
     fontSize: 17,
@@ -673,6 +953,36 @@ const styles = StyleSheet.create({
     padding: spacing[4],
     paddingBottom: 110,
     gap: spacing[4],
+  },
+  expiredBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 14,
+    padding: spacing[3],
+  },
+  expiredIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expiredBannerTitle: {
+    ...typography.bodyMedium,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#EF4444',
+  },
+  expiredBannerDesc: {
+    ...typography.caption,
+    fontSize: 12,
+    color: '#CBD5E1',
+    marginTop: 2,
   },
   loadingCenter: {
     flex: 1,
@@ -960,6 +1270,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#090A0E',
   },
+  visitBtnEnded: {
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  visitBtnTextEnded: {
+    color: '#EF4444',
+  },
   directBuyCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1050,5 +1368,226 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
     textAlign: 'center',
+  },
+  galleryWrap: {
+    gap: spacing[2],
+  },
+  heroImageCard: {
+    width: '100%',
+    height: 330,
+    backgroundColor: '#12141C',
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#1F2433',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroImagePressable: {
+    width: '100%',
+    height: '100%',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0E1017',
+  },
+  noImagePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  noImageText: {
+    ...typography.caption,
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  galleryDiscountBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: '#FF4500',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 4,
+    zIndex: 10,
+  },
+  galleryDiscountText: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.4,
+  },
+  galleryCounterPill: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(9, 10, 14, 0.75)',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
+  },
+  galleryCounterText: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  expandIconBtn: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(9, 10, 14, 0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 10,
+  },
+  arrowBtn: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(9, 10, 14, 0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    zIndex: 15,
+  },
+  arrowBtnLeft: {
+    left: 10,
+  },
+  arrowBtnRight: {
+    right: 10,
+  },
+  thumbnailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  thumbnailBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#1F2433',
+    backgroundColor: '#12141C',
+    opacity: 0.6,
+    position: 'relative',
+  },
+  thumbnailBoxSelected: {
+    borderColor: '#00FF66',
+    borderWidth: 2,
+    opacity: 1,
+    shadowColor: '#00FF66',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  thumbnailImg: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailActiveIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: '#00FF66',
+  },
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'space-between',
+  },
+  lightboxTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    zIndex: 10,
+  },
+  lightboxCounter: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  lightboxCounterText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  lightboxCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxImageWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '100%',
+  },
+  lightboxBottomBar: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(9, 10, 14, 0.9)',
+    borderTopWidth: 1,
+    borderTopColor: '#1F2433',
+  },
+  lightboxThumbRow: {
+    gap: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lightboxThumb: {
+    width: 54,
+    height: 54,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#334155',
+    opacity: 0.5,
+  },
+  lightboxThumbActive: {
+    borderColor: '#00FF66',
+    borderWidth: 2,
+    opacity: 1,
+  },
+  lightboxThumbImg: {
+    width: '100%',
+    height: '100%',
   },
 });

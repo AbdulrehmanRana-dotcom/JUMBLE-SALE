@@ -50,6 +50,9 @@ export function DealCard({
   onCommentPress,
   style,
 }: DealCardProps) {
+  // Clean away any leftover "(Copy)" or "(copy)" suffixes cleanly from UI display
+  const displayTitle = (title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim();
+
   // Format price if valid numbers/strings passed (zero dummy stats)
   const formattedPrice =
     typeof price === 'number' && price > 0
@@ -117,7 +120,7 @@ export function DealCard({
 
         {/* Deal Title */}
         <Text style={styles.title} numberOfLines={2}>
-          {title}
+          {displayTitle}
         </Text>
 
         {/* Price & Discount Info (Shifted higher up, right beneath title) */}

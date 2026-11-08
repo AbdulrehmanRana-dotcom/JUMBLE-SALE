@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,22 +21,37 @@ import {
 } from 'react-native';
 
 import { Button } from '@/components/ui/Button';
+import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { useToast } from '@/components/ui/Toast';
 import {
   getRecentlyViewedDeals,
   getSavedDealIds,
+  getSavedDealsList,
+  toggleDealSave,
   type RecentlyViewedDeal,
 } from '@/lib/activityStore';
-import { supabase } from '@/lib/supabase';
+import {
+  getNotificationSettings,
+  updateNotificationSettings,
+  type NotificationSettings,
+} from '@/lib/notificationSettingsStore';
+import { getUserPurchases, type AttributedOrder } from '@/lib/orderStore';
+import { getFollowedBrandsList, toggleFollowBrand } from '@/lib/followStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onProfileTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
-import { radii, spacing, typography } from '@/theme';
+import type { Brand, Deal } from '@/types/database.types';
+import { colors, radii, spacing, typography } from '@/theme';
 
-type ConsumerProfileView = 'menu' | 'change-password' | 'recent-deals';
+type ConsumerProfileView = 'menu' | 'change-password' | 'recent-deals' | 'shopping-history' | 'following-brands' | 'saved-deals';
 
 export default function ConsumerProfileScreen() {
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user, profile, updateProfile, signOut } = useAuth();
 
   // Active view state
@@ -45,6 +60,30 @@ export default function ConsumerProfileScreen() {
   // Modals state
   const [editProfileModalOpen, setEditProfileModalOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+  const [notificationsCenterOpen, setNotificationsCenterOpen] = useState(false);
+
+  // Listen to bottom navigation tab reset (e.g. clicking "Profile" in bottom bar)
+  useEffect(() => {
+    const unsubscribe = onProfileTabReset(() => {
+      setActiveView('menu');
+      setEditProfileModalOpen(false);
+      setNotificationsModalOpen(false);
+      refetchSavedCount();
+      refetchSavedDeals();
+      refetchFollowedBrands();
+      refetchViewedDeals();
+      refetchOrders();
+    });
+    return unsubscribe;
+  }, []);
+
+  // When returning to Profile tab from another screen, ensure modals are closed
+  useFocusEffect(
+    useCallback(() => {
+      setEditProfileModalOpen(false);
+      setNotificationsModalOpen(false);
+    }, [])
+  );
 
   // Edit Profile Form State
   const [displayName, setDisplayName] = useState(
@@ -76,47 +115,116 @@ export default function ConsumerProfileScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [updatingPassword, setUpdatingPassword] = useState(false);
 
-  // Notification Preferences State
+  // Notification Preferences State (Instagram style)
+  const { data: notifSettings, refetch: refetchNotifSettings } = useQuery<NotificationSettings>({
+    queryKey: ['notification-settings', user?.id || 'default'],
+    queryFn: () => getNotificationSettings(user?.id),
+  });
+
+  const handleUpdateSetting = async (key: keyof NotificationSettings, val: any) => {
+    await updateNotificationSettings({ [key]: val }, user?.id);
+    refetchNotifSettings();
+    toast.show('Settings updated ✓', 'success');
+  };
+
   const [pushAlerts, setPushAlerts] = useState(profile?.notifications_enabled !== false);
   const [expiryAlerts, setExpiryAlerts] = useState(true);
   const [brandAlerts, setBrandAlerts] = useState(true);
 
-  // Fetch Real Saved Deals Count (0 dummy)
-  const { data: savedCount = 0 } = useQuery<number>({
+  // Fetch Real Saved Deals List & Count (0 dummy)
+  const {
+    data: savedDealsList = [],
+    refetch: refetchSavedDeals,
+  } = useQuery<Deal[]>({
+    queryKey: ['saved-deals-list', user?.id || 'guest'],
+    queryFn: async () => {
+      return getSavedDealsList(user?.id || 'guest');
+    },
+    staleTime: 60 * 1000,
+  });
+
+  const { data: savedCount = 0, refetch: refetchSavedCount } = useQuery<number>({
     queryKey: ['profile-saved-count', user?.id || 'guest'],
     queryFn: async () => {
       const savedIds = await getSavedDealIds(user?.id || 'guest');
       return savedIds.length;
     },
-    staleTime: 10 * 1000,
+    staleTime: 60 * 1000,
   });
 
-  // Fetch Real Followed Brands Count (0 dummy)
-  const { data: brandsCount = 0 } = useQuery<number>({
-    queryKey: ['profile-brands-count', user?.id],
+  // Fetch Real Followed Brands (List + Count)
+  const {
+    data: followedBrands = [],
+    refetch: refetchFollowedBrands,
+  } = useQuery<Brand[]>({
+    queryKey: ['profile-followed-brands', user?.id],
     queryFn: async () => {
-      if (!user?.id) return 0;
-      const { count, error } = await supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-      if (error) return 0;
-      return count !== null ? count : 0;
+      if (!user?.id) return [];
+      try {
+        if (isSupabaseConfigured) {
+          const { data, error } = await supabase
+            .from('follows')
+            .select('brand_id, brands:brands(*)')
+            .eq('user_id', user.id);
+
+          if (!error && Array.isArray(data)) {
+            const list = data.map((item: any) => item.brands).filter(Boolean) as Brand[];
+            if (list.length > 0) return list;
+          }
+        }
+      } catch (err) {
+        console.warn('[ProfileScreen] Remote followed brands notice:', err);
+      }
+      return getFollowedBrandsList(user.id);
     },
     enabled: Boolean(user?.id),
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000,
   });
 
+  const brandsCount = followedBrands.length;
+
   // Fetch Real Recently Viewed Deals (0 dummy items)
-  const { data: viewedDeals = [] } = useQuery<RecentlyViewedDeal[]>({
+  const {
+    data: viewedDeals = [],
+    refetch: refetchViewedDeals,
+  } = useQuery<RecentlyViewedDeal[]>({
     queryKey: ['profile-recently-viewed', user?.id || 'guest'],
     queryFn: async () => {
       return getRecentlyViewedDeals();
     },
-    staleTime: 5 * 1000,
+    staleTime: 60 * 1000,
   });
 
   const viewedCount = viewedDeals.length;
+
+  // Fetch Real Tracked Shopping History (0 dummy items)
+  const {
+    data: userOrders = [],
+    refetch: refetchOrders,
+  } = useQuery<AttributedOrder[]>({
+    queryKey: ['profile-user-orders', user?.id || 'guest'],
+    queryFn: async () => {
+      return getUserPurchases(user?.id || 'guest');
+    },
+    staleTime: 60 * 1000,
+  });
+
+  const ordersCount = userOrders.length;
+
+  const handleRemoveSavedDeal = async (dealId: string) => {
+    try {
+      const effectiveUserId = user?.id || 'guest';
+      await toggleDealSave(dealId, effectiveUserId);
+      toast.show('Removed from saved collection', 'info');
+      refetchSavedCount();
+      refetchSavedDeals();
+      queryClient.invalidateQueries({ queryKey: ['saved-deals-list'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-saved-count'] });
+      queryClient.invalidateQueries({ queryKey: ['user-saved-deal-ids'] });
+    } catch (err: any) {
+      toast.show(err.message || 'Failed to remove', 'error');
+    }
+  };
 
   // Handlers
   const handlePickAvatarFromGallery = async () => {
@@ -552,7 +660,288 @@ export default function ConsumerProfileScreen() {
     );
   }
 
-  // ─── VIEW 3: MAIN PROFILE MENU ───
+  // ─── VIEW 3: SHOPPING HISTORY SCREEN ───
+  if (activeView === 'shopping-history') {
+    return (
+      <SafeAreaView style={styles.container}>
+        {/* Top Header */}
+        <View style={styles.topHeader}>
+          <View style={styles.topHeaderLeft}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoText}>Jsale</Text>
+            </View>
+            <Text style={styles.topHeaderTitle}>Profile</Text>
+          </View>
+        </View>
+
+        {/* Sub Header */}
+        <View style={styles.subHeaderBar}>
+          <Pressable
+            style={styles.backCircleBtn}
+            onPress={() => setActiveView('menu')}
+            hitSlop={8}
+            accessibilityLabel="Back to Profile">
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.subHeaderTitle}>My Shopping History ({ordersCount})</Text>
+        </View>
+
+        {/* List of Orders */}
+        {userOrders.length === 0 ? (
+          <View style={{ flex: 1, padding: spacing[4], justifyContent: 'center' }}>
+            <EmptyState
+              icon="bag-check-outline"
+              title="No Purchases Tracked Yet"
+              description="Jab aap Jumble Sale par kisi post ko dekh kar brand ki website se shopping karein ge, toh aapka shopping record aur verified discount yahan show hoga!"
+              actionLabel="Explore Active Deals"
+              onAction={() => {
+                setActiveView('menu');
+                router.push('/(consumer)' as any);
+              }}
+            />
+          </View>
+        ) : (
+          <FlatList
+            data={userOrders}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.recentDealsList}
+            renderItem={({ item }) => {
+              const formattedDate = new Date(item.created_at).toLocaleDateString('en-PK', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              });
+
+              return (
+                <View style={styles.orderItemCard}>
+                  <View style={styles.orderCardHeader}>
+                    <View style={styles.orderBrandRow}>
+                      <View style={styles.orderBrandCircle}>
+                        <Ionicons name="business" size={14} color="#00FF66" />
+                      </View>
+                      <Text style={styles.orderBrandName}>{item.brand_name}</Text>
+                    </View>
+                    <View style={styles.orderStatusPill}>
+                      <Ionicons name="checkmark-circle" size={12} color="#00FF66" />
+                      <Text style={styles.orderStatusText}>
+                        {item.status === 'confirmed' ? 'Verified Purchase' : 'Pending'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.orderDealTitle} numberOfLines={2}>
+                    {item.deal_title}
+                  </Text>
+
+                  <View style={styles.orderMetaRow}>
+                    <View>
+                      <Text style={styles.orderMetaLabel}>TOTAL PAID</Text>
+                      <Text style={styles.orderAmountText}>
+                        Rs. {Number(item.order_amount).toLocaleString()}
+                      </Text>
+                    </View>
+
+                    {item.order_reference ? (
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.orderMetaLabel}>ORDER REF</Text>
+                        <Text style={styles.orderRefText}>#{item.order_reference}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.orderAttributionFooter}>
+                    <Ionicons name="ribbon-outline" size={14} color="#00FF66" />
+                    <Text style={styles.orderAttributionText}>
+                      Shopped via Jumble Sale Post • {formattedDate}
+                    </Text>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // ─── VIEW 4: FOLLOWING BRANDS SCREEN (Instagram style) ───
+  if (activeView === 'following-brands') {
+    return (
+      <SafeAreaView style={styles.container}>
+        {/* Top Header */}
+        <View style={styles.topHeader}>
+          <View style={styles.topHeaderLeft}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoText}>Jsale</Text>
+            </View>
+            <Text style={styles.topHeaderTitle}>Profile</Text>
+          </View>
+        </View>
+
+        {/* Following Brands Sub Header */}
+        <View style={styles.subHeaderBar}>
+          <Pressable
+            style={styles.backCircleBtn}
+            onPress={() => setActiveView('menu')}
+            hitSlop={8}
+            accessibilityLabel="Back to Profile">
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.subHeaderTitle}>Following Brands ({followedBrands.length})</Text>
+        </View>
+
+        {/* List of Followed Brands */}
+        {followedBrands.length === 0 ? (
+          <View style={{ flex: 1, padding: spacing[4], justifyContent: 'center' }}>
+            <EmptyState
+              icon="heart-outline"
+              title="No Followed Brands Yet"
+              description="Follow your favorite retail brands (like Khaadi, Outfitters, Gul Ahmed) to stay updated on their latest promotions and exclusive sales."
+              actionLabel="Discover Brands"
+              onAction={() => {
+                setActiveView('menu');
+                router.push('/(consumer)/explore' as any);
+              }}
+            />
+          </View>
+        ) : (
+          <FlatList
+            data={followedBrands}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.followingListContent}
+            renderItem={({ item }) => (
+              <Pressable
+                style={styles.followingBrandCard}
+                onPress={() => router.push(`/(consumer)/brand/${item.id}` as any)}>
+                {/* Brand Avatar */}
+                <View style={styles.followingBrandAvatarWrap}>
+                  {item.logo_url ? (
+                    <Image source={{ uri: item.logo_url }} style={styles.followingBrandAvatar} />
+                  ) : (
+                    <View style={styles.followingBrandPlaceholder}>
+                      <Ionicons name="business" size={22} color={colors.primary} />
+                    </View>
+                  )}
+                </View>
+
+                {/* Brand Info */}
+                <View style={{ flex: 1, gap: 2 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.followingBrandName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    {item.is_verified && (
+                      <Ionicons name="checkmark-circle" size={15} color={colors.primary} />
+                    )}
+                  </View>
+                  <Text style={styles.followingBrandCategory} numberOfLines={1}>
+                    {item.category || 'Retail Outlet'}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Ionicons name="pricetag-outline" size={11} color={colors.primary} />
+                    <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600' }}>
+                      View all posts & deals
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Unfollow Button */}
+                <Pressable
+                  style={styles.followingItemBtn}
+                  onPress={async (e) => {
+                    e.stopPropagation();
+                    if (!user?.id) return;
+                    try {
+                      await toggleFollowBrand(item.id, user.id);
+                      toast.show(`Unfollowed ${item.name}`, 'info');
+                      refetchFollowedBrands();
+                    } catch (err: any) {
+                      toast.show(err.message || 'Action failed', 'error');
+                    }
+                  }}>
+                  <Ionicons name="checkmark-sharp" size={14} color={colors.primary} />
+                  <Text style={styles.followingItemBtnText}>Following</Text>
+                </Pressable>
+
+                {/* Arrow */}
+                <Ionicons name="chevron-forward" size={16} color="#64748B" />
+              </Pressable>
+            )}
+          />
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // ─── VIEW 5: SAVED DEALS SCREEN (Instagram style) ───
+  if (activeView === 'saved-deals') {
+    return (
+      <SafeAreaView style={styles.container}>
+        {/* Top Header */}
+        <View style={styles.topHeader}>
+          <View style={styles.topHeaderLeft}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoText}>Jsale</Text>
+            </View>
+            <Text style={styles.topHeaderTitle}>Profile</Text>
+          </View>
+        </View>
+
+        {/* Saved Deals Sub Header */}
+        <View style={styles.subHeaderBar}>
+          <Pressable
+            style={styles.backCircleBtn}
+            onPress={() => setActiveView('menu')}
+            hitSlop={8}
+            accessibilityLabel="Back to Profile">
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.subHeaderTitle}>Saved Deals ({savedCount})</Text>
+        </View>
+
+        {/* List of Saved Deals */}
+        {savedDealsList.length === 0 ? (
+          <View style={{ flex: 1, padding: spacing[4], justifyContent: 'center' }}>
+            <EmptyState
+              icon="bookmark-outline"
+              title="No Saved Deals Yet"
+              description="Tap the save / bookmark icon on any promotion to save it to your collection."
+              actionLabel="Discover Deals"
+              onAction={() => {
+                setActiveView('menu');
+                router.push('/(consumer)' as any);
+              }}
+            />
+          </View>
+        ) : (
+          <FlatList
+            data={savedDealsList}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.followingListContent}
+            renderItem={({ item }) => (
+              <View style={{ marginBottom: spacing[3] }}>
+                <DealCard
+                  title={item.title}
+                  brandName={(item as any).brand?.name || (item as any).brand_name || 'Brand'}
+                  brandLogo={(item as any).brand?.logo_url}
+                  discountLabel={`${item.discount_pct}% OFF`}
+                  price={(item as any).price || (item as any).discount_price || null}
+                  originalPrice={(item as any).original_price || null}
+                  imageUri={item.image_urls?.[0]}
+                  expiresLabel={`Ends ${new Date(item.end_date).toLocaleDateString()}`}
+                  saved={true}
+                  onPress={() => router.push(`/(consumer)/deal/${item.id}` as any)}
+                  onToggleSave={() => handleRemoveSavedDeal(item.id)}
+                />
+              </View>
+            )}
+          />
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // ─── VIEW 6: MAIN PROFILE MENU ───
   return (
     <SafeAreaView style={styles.container}>
       {/* Top Header */}
@@ -563,6 +952,13 @@ export default function ConsumerProfileScreen() {
           </View>
           <Text style={styles.topHeaderTitle}>Profile</Text>
         </View>
+
+        <NotificationBell
+          role="consumer"
+          userId={user?.id}
+          onPress={() => setNotificationsCenterOpen(true)}
+          style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#141721', borderColor: '#202432' }}
+        />
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -570,7 +966,7 @@ export default function ConsumerProfileScreen() {
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatarRing}>
-              {avatarUrl || profile?.avatar_url ? (
+              {Boolean((avatarUrl && avatarUrl.trim().length > 5) || (profile?.avatar_url && profile.avatar_url.trim().length > 5)) ? (
                 <Image
                   source={{ uri: avatarUrl || profile?.avatar_url || undefined }}
                   style={styles.avatarImage}
@@ -598,7 +994,7 @@ export default function ConsumerProfileScreen() {
           <View style={styles.statsContainer}>
             <Pressable
               style={styles.statBox}
-              onPress={() => router.push('/(consumer)/saved' as any)}>
+              onPress={() => setActiveView('saved-deals')}>
               <Text style={styles.statNumber}>{savedCount}</Text>
               <Text style={styles.statLabel}>SAVED</Text>
             </Pressable>
@@ -607,18 +1003,18 @@ export default function ConsumerProfileScreen() {
 
             <Pressable
               style={styles.statBox}
-              onPress={() => router.push('/(consumer)/saved' as any)}>
-              <Text style={styles.statNumber}>{brandsCount}</Text>
-              <Text style={styles.statLabel}>BRANDS</Text>
+              onPress={() => setActiveView('shopping-history')}>
+              <Text style={styles.statNumber}>{ordersCount}</Text>
+              <Text style={styles.statLabel}>ORDERS</Text>
             </Pressable>
 
             <View style={styles.statDivider} />
 
             <Pressable
               style={styles.statBox}
-              onPress={() => setActiveView('recent-deals')}>
-              <Text style={styles.statNumber}>{viewedCount}</Text>
-              <Text style={styles.statLabel}>VIEWED</Text>
+              onPress={() => setActiveView('following-brands')}>
+              <Text style={styles.statNumber}>{brandsCount}</Text>
+              <Text style={styles.statLabel}>FOLLOWING</Text>
             </Pressable>
           </View>
         </View>
@@ -667,7 +1063,7 @@ export default function ConsumerProfileScreen() {
         <View style={styles.menuGroupCard}>
           <Pressable
             style={styles.menuItem}
-            onPress={() => router.push('/(consumer)/saved' as any)}>
+            onPress={() => setActiveView('saved-deals')}>
             <View style={styles.iconCircle}>
               <Ionicons name="bookmark" size={18} color="#00FF66" />
             </View>
@@ -679,16 +1075,38 @@ export default function ConsumerProfileScreen() {
 
           <View style={styles.menuItemDivider} />
 
-          {/* Recent Deals option matching Image 2 */}
+          {/* Followed Brands Option (Instagram style) */}
           <Pressable
             style={styles.menuItem}
-            onPress={() => setActiveView('recent-deals')}>
-            <View style={styles.iconCircle}>
-              <Ionicons name="time" size={18} color="#00FF66" />
+            onPress={() => setActiveView('following-brands')}>
+            <View style={[styles.iconCircle, { backgroundColor: 'rgba(0, 255, 102, 0.12)' }]}>
+              <Ionicons name="people" size={18} color="#00FF66" />
             </View>
-            <Text style={styles.menuItemText}>Recently Viewed Deals</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>Followed Brands</Text>
+              <Text style={{ fontSize: 11, color: '#94A3B8' }}>Stores you follow for deals & updates</Text>
+            </View>
             <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{viewedCount}</Text>
+              <Text style={styles.countBadgeText}>{brandsCount}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#64748B" style={styles.chevron} />
+          </Pressable>
+
+          <View style={styles.menuItemDivider} />
+
+          {/* My Shopping History Option */}
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => setActiveView('shopping-history')}>
+            <View style={[styles.iconCircle, { backgroundColor: 'rgba(0, 255, 102, 0.12)' }]}>
+              <Ionicons name="bag-check" size={18} color="#00FF66" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuItemText}>My Shopping History</Text>
+              <Text style={{ fontSize: 11, color: '#94A3B8' }}>Orders tracked via Jumble Sale</Text>
+            </View>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{ordersCount}</Text>
             </View>
           </Pressable>
         </View>
@@ -806,61 +1224,143 @@ export default function ConsumerProfileScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.modalForm}>
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchTitle}>Push Notifications</Text>
-                  <Text style={styles.switchSubtitle}>Alerts for top discounts & saved deals</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
+              <View style={styles.modalForm}>
+                {/* 1. Quiet Hours (Do Not Disturb) */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.switchTitle}>Quiet Hours (Do Not Disturb)</Text>
+                      <View style={{ backgroundColor: 'rgba(0,255,102,0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 9, color: '#00FF66', fontWeight: '800' }}>11 PM - 8 AM</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.switchSubtitle}>Mute loud buzz & banners overnight; alerts save silently</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.quiet_hours_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('quiet_hours_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.quiet_hours_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
                 </View>
-                <Switch
-                  value={pushAlerts}
-                  onValueChange={handleTogglePushAlerts}
-                  trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
-                  thumbColor={pushAlerts ? '#00FF66' : '#64748B'}
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 2. In-Flight Top Banners */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>In-Flight Top Banners</Text>
+                    <Text style={styles.switchSubtitle}>Floating dropdown alerts while scrolling inside the app</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.in_app_banner_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('in_app_banner_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.in_app_banner_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 3. Push Notifications */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>Push Notifications</Text>
+                    <Text style={styles.switchSubtitle}>OS lock-screen alerts & app icon badge</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.push_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('push_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.push_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 4. Followed Brand Alerts */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>Followed Brand Alerts</Text>
+                    <Text style={styles.switchSubtitle}>Instant updates from your favorite stores</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.followers_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('followers_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.followers_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 5. Deal Expiry Reminders */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>Deal Expiry Reminders</Text>
+                    <Text style={styles.switchSubtitle}>Notify when saved deals are ending in &lt;48 hours</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.deals_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('deals_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.deals_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 6. Orders & Purchase Claims */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>Orders & Purchase Claims</Text>
+                    <Text style={styles.switchSubtitle}>Verification receipts and shopping claim status</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.orders_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('orders_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.orders_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <View style={styles.menuItemDivider} />
+
+                {/* 7. Likes & Reactions */}
+                <View style={styles.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.switchTitle}>Likes & Social Reactions</Text>
+                    <Text style={styles.switchSubtitle}>Social rollups and interactions</Text>
+                  </View>
+                  <Switch
+                    value={notifSettings?.likes_enabled ?? true}
+                    onValueChange={(val) => handleUpdateSetting('likes_enabled', val)}
+                    trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
+                    thumbColor={(notifSettings?.likes_enabled ?? true) ? '#00FF66' : '#64748B'}
+                  />
+                </View>
+
+                <Button
+                  label="Done"
+                  variant="primary"
+                  size="md"
+                  onPress={() => setNotificationsModalOpen(false)}
+                  style={{ marginTop: spacing[4] }}
                 />
               </View>
-
-              <View style={styles.menuItemDivider} />
-
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchTitle}>Deal Expiry Reminders</Text>
-                  <Text style={styles.switchSubtitle}>Notify when saved deals are ending soon</Text>
-                </View>
-                <Switch
-                  value={expiryAlerts}
-                  onValueChange={setExpiryAlerts}
-                  trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
-                  thumbColor={expiryAlerts ? '#00FF66' : '#64748B'}
-                />
-              </View>
-
-              <View style={styles.menuItemDivider} />
-
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchTitle}>Followed Brand Alerts</Text>
-                  <Text style={styles.switchSubtitle}>Instant updates from your favorite stores</Text>
-                </View>
-                <Switch
-                  value={brandAlerts}
-                  onValueChange={setBrandAlerts}
-                  trackColor={{ false: '#202432', true: 'rgba(0,255,102,0.3)' }}
-                  thumbColor={brandAlerts ? '#00FF66' : '#64748B'}
-                />
-              </View>
-
-              <Button
-                label="Done"
-                variant="primary"
-                size="md"
-                onPress={() => setNotificationsModalOpen(false)}
-                style={{ marginTop: spacing[4] }}
-              />
-            </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
+
+      {/* In-App Notification Center Modal */}
+      <NotificationCenterModal
+        visible={notificationsCenterOpen}
+        onClose={() => setNotificationsCenterOpen(false)}
+        role="consumer"
+        userId={user?.id}
+      />
     </SafeAreaView>
   );
 }
@@ -1350,5 +1850,169 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 2,
+  },
+  orderItemCard: {
+    backgroundColor: '#141721',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#202432',
+  },
+  orderCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  orderBrandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  orderBrandCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderBrandName: {
+    ...typography.caption,
+    fontWeight: '800',
+    color: '#00FF66',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  orderStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  orderStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00FF66',
+  },
+  orderDealTitle: {
+    ...typography.body,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  orderMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F121C',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  orderMetaLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    marginBottom: 2,
+    letterSpacing: 0.5,
+  },
+  orderAmountText: {
+    ...typography.body,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#00FF66',
+  },
+  orderRefText: {
+    ...typography.caption,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  orderAttributionFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#1E2333',
+  },
+  orderAttributionText: {
+    ...typography.caption,
+    color: '#94A3B8',
+    fontSize: 11,
+  },
+  followingListContent: {
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[8],
+    gap: spacing[3],
+  },
+  followingBrandCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#30363D',
+    borderRadius: radii.xl,
+    padding: spacing[3],
+    gap: spacing[3],
+  },
+  followingBrandAvatarWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#21262D',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  followingBrandAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  followingBrandPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  followingBrandName: {
+    ...typography.body,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  followingBrandCategory: {
+    ...typography.caption,
+    fontSize: 12,
+    color: '#8B949E',
+  },
+  followingBrandMeta: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#8B949E',
+  },
+  followingItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.md,
+  },
+  followingItemBtnText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

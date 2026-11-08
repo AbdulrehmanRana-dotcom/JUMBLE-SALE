@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -21,7 +21,10 @@ import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/ui/Header';
 import { useToast } from '@/components/ui/Toast';
-import { supabase } from '@/lib/supabase';
+import { getSavedDealsList, toggleDealSave } from '@/lib/activityStore';
+import { getFollowedBrandsList, toggleFollowBrand } from '@/lib/followStore';
+import { checkExpiringSavedDeals } from '@/lib/notificationStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import type { Brand, Deal } from '@/types/database.types';
 import { colors, radii, spacing, typography } from '@/theme';
@@ -29,28 +32,26 @@ import { colors, radii, spacing, typography } from '@/theme';
 export default function SavedDealsScreen() {
   const router = useRouter();
   const toast = useToast();
+  const queryClient = useQueryClient();
   const { user, isGuest } = useAuth();
   const [activeTab, setActiveTab] = useState<'deals' | 'brands'>('deals');
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  // Fetch Saved Deals
+  // Fetch Saved Deals (Resilient local & remote hybrid resolver)
   const {
     data: savedDeals = [],
     isLoading: loadingDeals,
     refetch: refetchDeals,
   } = useQuery<Deal[]>({
-    queryKey: ['saved-deals-list', user?.id],
+    queryKey: ['saved-deals-list', user?.id || 'guest'],
     queryFn: async () => {
-      if (!user?.id) return [];
-      const { data, error } = await supabase
-        .from('saved_deals')
-        .select('deal_id, deals:deals(*, brand:brands(*))')
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-      return (data?.map((item: any) => item.deals).filter(Boolean) as Deal[]) ?? [];
+      const deals = await getSavedDealsList(user?.id || 'guest');
+      if (user?.id && deals.length > 0) {
+        checkExpiringSavedDeals(user.id, deals).catch(() => {});
+      }
+      return deals;
     },
-    enabled: Boolean(user?.id && !isGuest),
+    staleTime: 0,
   });
 
   // Fetch Followed Brands
@@ -62,42 +63,44 @@ export default function SavedDealsScreen() {
     queryKey: ['followed-brands-list', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data, error } = await supabase
-        .from('follows')
-        .select('brand_id, brands:brands(*)')
-        .eq('user_id', user.id);
+      try {
+        if (isSupabaseConfigured) {
+          const { data, error } = await supabase
+            .from('follows')
+            .select('brand_id, brands:brands(*)')
+            .eq('user_id', user.id);
 
-      if (error) throw error;
-      return (data?.map((item: any) => item.brands).filter(Boolean) as Brand[]) ?? [];
+          if (!error && Array.isArray(data)) {
+            const list = data.map((item: any) => item.brands).filter(Boolean) as Brand[];
+            if (list.length > 0) return list;
+          }
+        }
+      } catch (err) {
+        console.warn('[SavedScreen] Remote followed brands notice:', err);
+      }
+      return getFollowedBrandsList(user.id);
     },
     enabled: Boolean(user?.id && !isGuest),
   });
 
   const handleRemoveSaved = async (dealId: string) => {
-    if (!user?.id) return;
     try {
-      await supabase
-        .from('saved_deals')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('deal_id', dealId);
-
+      const effectiveUserId = user?.id || 'guest';
+      await toggleDealSave(dealId, effectiveUserId);
       toast.show('Removed from saved collection', 'info');
       refetchDeals();
+      queryClient.invalidateQueries({ queryKey: ['saved-deals-list'] });
+      queryClient.invalidateQueries({ queryKey: ['profile-saved-count'] });
+      queryClient.invalidateQueries({ queryKey: ['user-saved-deal-ids'] });
     } catch (err: any) {
-      toast.show(err.message, 'error');
+      toast.show(err.message || 'Failed to remove deal', 'error');
     }
   };
 
   const handleUnfollowBrand = async (brandId: string, name: string) => {
     if (!user?.id) return;
     try {
-      await supabase
-        .from('follows')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('brand_id', brandId);
-
+      await toggleFollowBrand(brandId, user.id);
       toast.show(`Unfollowed ${name}`, 'info');
       refetchBrands();
     } catch (err: any) {
@@ -204,7 +207,8 @@ export default function SavedDealsScreen() {
               <View style={styles.cardWrap}>
                 <DealCard
                   title={item.title}
-                  brandName={item.brand?.name || 'Brand'}
+                  brandName={item.brand?.name || (item as any).brand_name || 'Brand'}
+                  brandLogo={item.brand?.logo_url}
                   discountLabel={`${item.discount_pct}% OFF`}
                   price={(item as any).price || (item as any).discount_price || null}
                   originalPrice={(item as any).original_price || null}

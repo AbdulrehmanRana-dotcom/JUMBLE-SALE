@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,6 +9,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -21,54 +22,57 @@ import {
 } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
+import { DealLiveTimer } from '@/components/brand/DealLiveTimer';
+import { PostInsightsDrawer } from '@/components/brand/PostInsightsDrawer';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { getDealInteractions } from '@/lib/activityStore';
 import { getLocalBrands } from '@/lib/brandStore';
-import { deleteLocalDeal, getLocalBrandDeals, saveLocalDeal } from '@/lib/dealStore';
+import {
+  deleteLocalDeal,
+  duplicateDeal,
+  extendDealExpiry,
+  getDealRemainingDays,
+  getLocalBrandDeals,
+  isDealExpired,
+  saveLocalDeal,
+  toggleDealPause,
+  toggleDealPin,
+} from '@/lib/dealStore';
+import { getBrandFollowers } from '@/lib/followStore';
 import { generateBrandPromoCopy, type CopyLanguage, type CopyTone } from '@/lib/gemini';
+import { createNotification } from '@/lib/notificationStore';
 import { compressAndUploadDealImage } from '@/lib/storage';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onBrandPostsTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import { radii, spacing, typography } from '@/theme';
 import type { Brand, Deal } from '@/types/database.types';
 
 const CATEGORIES = [
-  'Fashion',
-  'Shoes',
-  'Electronics',
-  'Beauty',
-  'Accessories',
-  'Food',
+  'Fashion & Apparel',
+  'Footwear & Accessories',
+  'Electronics & Mobiles',
+  'Food & Dining',
+  'Beauty & Cosmetics',
+  'Grocery & Supermarket',
+  'Home & Living',
+  'Travel & Experiences',
 ];
 
-const PRESET_IMAGES = [
-  {
-    label: 'Lawn Suit',
-    url: 'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=1000&q=80',
-  },
-  {
-    label: 'Dinner Suit',
-    url: 'https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?w=1000&q=80',
-  },
-  {
-    label: 'Casual Shirt',
-    url: 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=1000&q=80',
-  },
-  {
-    label: 'Footwear',
-    url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=1000&q=80',
-  },
-  {
-    label: 'Watch',
-    url: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=1000&q=80',
-  },
-  {
-    label: 'Accessories',
-    url: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=1000&q=80',
-  },
+export const TARGET_PAKISTAN_CITIES = [
+  'All Pakistan',
+  'Lahore',
+  'Karachi',
+  'Islamabad',
+  'Rawalpindi',
+  'Faisalabad',
+  'Multan',
+  'Peshawar',
 ];
+
+const DISCOUNT_PRESETS = [20, 30, 50, 70];
 
 function generateUUID(): string {
   try {
@@ -96,6 +100,21 @@ export default function BrandPostsScreen() {
   // Speed Dial FAB State
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
 
+  // Instagram-style: Tapping Posts in bottom nav resets back to initial view
+  useEffect(() => {
+    const unsubscribe = onBrandPostsTabReset(() => {
+      setCreateModalOpen(false);
+      setEditingPost(null);
+      setSelectionMode('none');
+      setSelectedPostIds([]);
+      setShowMenuDropdown(false);
+      setSpeedDialOpen(false);
+      setAiModalOpen(false);
+      setPostFilterTab('all');
+    });
+    return unsubscribe;
+  }, []);
+
   // Selection Mode State (Delete or Edit selection mode)
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('none');
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
@@ -106,18 +125,26 @@ export default function BrandPostsScreen() {
   const [editingPost, setEditingPost] = useState<Deal | null>(null);
   const [publishing, setPublishing] = useState(false);
 
-  // Form Fields matching Screenshot 2
+  // Form Fields matching User Filter & Preferences
   const [productName, setProductName] = useState('');
   const [brandNameInput, setBrandNameInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Fashion');
   const [saleLastDate, setSaleLastDate] = useState('2026-10-31');
-  const [storeAvailability, setStoreAvailability] = useState<'in_store' | 'physical'>('in_store');
+  const [dealType, setDealType] = useState<'online' | 'in_store'>('online');
+  const [selectedCity, setSelectedCity] = useState<string>('All Pakistan');
   const [discountType, setDiscountType] = useState<'flat' | 'upto' | 'percentage'>('percentage');
   const [originalPrice, setOriginalPrice] = useState('');
-  const [discountPct, setDiscountPct] = useState('');
+  const [discountPct, setDiscountPct] = useState('20');
   const [dealDescription, setDealDescription] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  const [uploadingImage, setUploadingImage] = useState(false);
+  // 1. Cover Photo (Compulsory / Lazmi)
+  const [coverPhoto, setCoverPhoto] = useState('');
+  const [coverPhotoInputUrl, setCoverPhotoInputUrl] = useState('');
+  const [uploadingCover, setUploadingCover] = useState(false);
+
+  // 2. Extra Product Photos (Different option - up to 5 photos)
+  const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
+  const [extraPhotoInputUrl, setExtraPhotoInputUrl] = useState('');
+  const [uploadingExtra, setUploadingExtra] = useState(false);
   const [postStatus, setPostStatus] = useState<'active' | 'expired'>('active');
   const [buyUrl, setBuyUrl] = useState('');
 
@@ -128,8 +155,8 @@ export default function BrandPostsScreen() {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiResults, setAiResults] = useState<{ titles: string[]; descriptions: string[] } | null>(null);
 
-  // 1. Fetch Brand Profile
-  const { data: brand, refetch: refetchBrand } = useQuery<Brand | null>({
+  // 1. Fetch Brand Profile (cached with 5-minute staleTime and fast network race)
+  const { data: brand } = useQuery<Brand | null>({
     queryKey: ['my-brand', user?.id],
     queryFn: async () => {
       const localBrands = await getLocalBrands();
@@ -140,18 +167,26 @@ export default function BrandPostsScreen() {
             (user?.email &&
               b.business_email?.toLowerCase() === user.email.toLowerCase())
         ) || localBrands[0] || null;
+
+      if (!user?.id || !isSupabaseConfigured) return localMatch || authBrand;
+
       try {
-        if (!user?.id) return localMatch || authBrand;
-        const { data } = await supabase
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1000)
+        );
+        const dbPromise = supabase
           .from('brands')
           .select('*')
           .eq('owner_id', user.id)
           .maybeSingle();
-        return (data as unknown as Brand) ?? localMatch ?? authBrand;
+
+        const res: any = await Promise.race([dbPromise, timeoutPromise]);
+        return (res?.data as unknown as Brand) ?? localMatch ?? authBrand;
       } catch {
         return localMatch || authBrand;
       }
     },
+    staleTime: 5 * 60 * 1000,
   });
 
   const activeBrandId =
@@ -159,7 +194,7 @@ export default function BrandPostsScreen() {
     (authBrand?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authBrand.id) ? authBrand.id : null) ||
     'b1111111-1111-1111-1111-111111111111';
 
-  // 2. Fetch Real Posts from Database / Local Store
+  // 2. Fetch Real Posts (Instant 0ms memory cache + fast 1.2s timeout network race)
   const {
     data: deals = [],
     isLoading,
@@ -169,22 +204,24 @@ export default function BrandPostsScreen() {
     queryKey: ['brand-deals-posts', activeBrandId],
     queryFn: async () => {
       const localDeals = await getLocalBrandDeals(activeBrandId);
+      if (!isSupabaseConfigured || !activeBrandId) {
+        return localDeals;
+      }
+
       try {
-        if (!activeBrandId) return localDeals;
-        const { data, error } = await (supabase.from('deals') as any)
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 1200)
+        );
+        const queryPromise = (supabase.from('deals') as any)
           .select('*, brand:brands(*)')
           .eq('brand_id', activeBrandId)
           .order('created_at', { ascending: false });
 
-        if (error) {
-          console.warn('[posts] Supabase fetch notice:', error.message);
-          return localDeals;
-        }
-
-        const serverDeals = (data as Deal[]) ?? [];
-        if (serverDeals.length > 0) {
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (res?.data && res.data.length > 0) {
+          const serverDeals = res.data as Deal[];
           for (const sd of serverDeals) {
-            await saveLocalDeal(sd);
+            saveLocalDeal(sd).catch(() => {});
           }
           const merged = [...serverDeals];
           for (const ld of localDeals) {
@@ -199,36 +236,136 @@ export default function BrandPostsScreen() {
         return localDeals;
       }
     },
+    staleTime: 60 * 1000,
   });
 
   const dealIdsKey = deals.map((d) => d.id).sort().join(',');
 
-  const { data: postStats = {}, refetch: refetchStats } = useQuery<
+  // 3. Post interaction stats (parallelized with Promise.all and cached)
+  const { data: postStats = {} } = useQuery<
     Record<string, { likes: number; comments: number; shares: number }>
   >({
     queryKey: ['brand-post-stats', dealIdsKey],
     queryFn: async () => {
       const statsMap: Record<string, { likes: number; comments: number; shares: number }> = {};
-      for (const d of deals) {
-        statsMap[d.id] = await getDealInteractions(d.id);
-      }
+      await Promise.all(
+        deals.map(async (d) => {
+          try {
+            statsMap[d.id] = await getDealInteractions(d.id);
+          } catch {
+            statsMap[d.id] = { likes: 0, comments: 0, shares: 0 };
+          }
+        })
+      );
       return statsMap;
     },
+    staleTime: 60 * 1000,
     enabled: deals.length > 0,
   });
 
-  useFocusEffect(
-    useCallback(() => {
-      refetchBrand();
-      refetch();
-      refetchStats();
-    }, [refetchBrand, refetch, refetchStats])
+  // Drawer state for Real Database Post Insights
+  const [insightsDeal, setInsightsDeal] = useState<Deal | null>(null);
+
+  // Filter Tabs: All, Active, Paused, Expired
+  const [postFilterTab, setPostFilterTab] = useState<'all' | 'active' | 'paused' | 'expired'>('all');
+
+  const activeCount = useMemo(
+    () => deals.filter((d) => d.status === 'active' && !isDealExpired(d)).length,
+    [deals]
+  );
+  const pausedCount = useMemo(
+    () => deals.filter((d) => d.status === 'paused').length,
+    [deals]
+  );
+  const expiredCount = useMemo(
+    () => deals.filter((d) => isDealExpired(d) || d.status === 'expired').length,
+    [deals]
   );
 
-  // Exclusively show real deals (NO dummy/mock posts)
+  // Dynamic filter according to active tab + Pinned promotions always at top
   const displayPosts = useMemo(() => {
-    return deals;
-  }, [deals]);
+    let filtered = deals;
+    if (postFilterTab === 'active') {
+      filtered = deals.filter((d) => d.status === 'active' && !isDealExpired(d));
+    } else if (postFilterTab === 'paused') {
+      filtered = deals.filter((d) => d.status === 'paused');
+    } else if (postFilterTab === 'expired') {
+      filtered = deals.filter((d) => isDealExpired(d) || d.status === 'expired');
+    }
+
+    return [...filtered].sort((a, b) => {
+      // 1. Pinned to top
+      if (Boolean(b.is_pinned) !== Boolean(a.is_pinned)) {
+        return (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0);
+      }
+      // 2. Newest first
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+  }, [deals, postFilterTab]);
+
+  // ─── Real Database Post Management Handlers ───
+  const handleTogglePin = async (deal: Deal) => {
+    try {
+      const isPinned = await toggleDealPin(deal.id);
+      toast.show(
+        isPinned ? `📌 "${deal.title}" pinned to top of promotions!` : `Unpinned "${deal.title}"`,
+        'success'
+      );
+      queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+    } catch {
+      toast.show('Failed to update pin status', 'error');
+    }
+  };
+
+  const handleTogglePause = async (deal: Deal) => {
+    try {
+      const newStatus = await toggleDealPause(deal.id);
+      const isNowPaused = newStatus === 'paused';
+      toast.show(
+        isNowPaused
+          ? `⏸️ Promotion paused (Marked Out of Stock)`
+          : `▶️ Promotion resumed and live!`,
+        isNowPaused ? 'info' : 'success'
+      );
+      queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      if (insightsDeal && insightsDeal.id === deal.id) {
+        setInsightsDeal((prev) => (prev ? { ...prev, status: newStatus } : null));
+      }
+    } catch {
+      toast.show('Failed to update deal status', 'error');
+    }
+  };
+
+  const handleQuickExtend = async (dealId: string, days: number) => {
+    try {
+      const updated = await extendDealExpiry(dealId, days);
+      if (updated) {
+        toast.show(`⏳ Deal extended by ${days} days and reactivated!`, 'success');
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+        if (insightsDeal && insightsDeal.id === dealId) {
+          setInsightsDeal(updated);
+        }
+      }
+    } catch {
+      toast.show('Failed to extend deal', 'error');
+    }
+  };
+
+  const handleDuplicate = async (dealId: string) => {
+    try {
+      const cloned = await duplicateDeal(dealId);
+      if (cloned) {
+        toast.show('📋 Promotion duplicated successfully!', 'success');
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      }
+    } catch {
+      toast.show('Failed to clone promotion', 'error');
+    }
+  };
 
   const brandDisplayName = brand?.name || authBrand?.name || profile?.display_name || 'My Brand';
   const brandHandle = `@${brandDisplayName.toLowerCase().replace(/[^a-z0-9]/g, '')}_official`;
@@ -306,18 +443,21 @@ export default function BrandPostsScreen() {
     );
   };
 
-  // Open Create / Edit Modal
-  const handleOpenCreateModal = (postToEdit?: Deal) => {
+  // Open Create / Edit Modal (supports extending expired deals)
+  const handleOpenCreateModal = (postToEdit?: Deal, isExtending: boolean = false) => {
     setSelectionMode('none');
     if (postToEdit) {
       setEditingPost(postToEdit);
       setProductName(postToEdit.title);
       setBrandNameInput(brandDisplayName);
       setSelectedCategory(postToEdit.brand?.category || 'Fashion');
-      setSaleLastDate(
-        postToEdit.end_date ? postToEdit.end_date.split('T')[0] : '2026-10-31'
-      );
-      setStoreAvailability(postToEdit.deal_type === 'online' ? 'in_store' : 'physical');
+      
+      const futureDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+      const existingDate = postToEdit.end_date ? postToEdit.end_date.split('T')[0] : futureDate;
+
+      setSaleLastDate(isExtending ? futureDate : existingDate);
+      setDealType(postToEdit.deal_type === 'in_store' ? 'in_store' : 'online');
+      setSelectedCity(postToEdit.city || 'All Pakistan');
       setDiscountType('percentage');
       setOriginalPrice(
         postToEdit.original_price
@@ -328,8 +468,16 @@ export default function BrandPostsScreen() {
       );
       setDiscountPct(String(postToEdit.discount_pct || '20'));
       setDealDescription(postToEdit.description || '');
-      setImageUrl(postToEdit.image_urls?.[0] || '');
-      setPostStatus(postToEdit.status === 'expired' ? 'expired' : 'active');
+
+      const loadedCover = postToEdit.banner_url || postToEdit.image_urls?.[0] || '';
+      const loadedExtras = Array.isArray(postToEdit.image_urls) && postToEdit.image_urls.length > 1
+        ? postToEdit.image_urls.slice(1, 6)
+        : [];
+      setCoverPhoto(loadedCover);
+      setCoverPhotoInputUrl('');
+      setExtraPhotos(loadedExtras);
+      setExtraPhotoInputUrl('');
+      setPostStatus(isExtending ? 'active' : postToEdit.status === 'expired' ? 'expired' : 'active');
       setBuyUrl(postToEdit.buy_url || (postToEdit as any).website_url || '');
     } else {
       setEditingPost(null);
@@ -337,62 +485,162 @@ export default function BrandPostsScreen() {
       setBrandNameInput(brandDisplayName);
       setSelectedCategory('Fashion');
       setSaleLastDate('2026-10-31');
-      setStoreAvailability('in_store');
+      setDealType('online');
+      setSelectedCity('All Pakistan');
       setDiscountType('percentage');
       setOriginalPrice('');
       setDiscountPct('20');
       setDealDescription('');
-      setImageUrl('');
+      setCoverPhoto('');
+      setCoverPhotoInputUrl('');
+      setExtraPhotos([]);
+      setExtraPhotoInputUrl('');
       setPostStatus('active');
       setBuyUrl('');
     }
     setCreateModalOpen(true);
   };
 
-  // Pick Image from Device Gallery with Permission Request
-  const handlePickImage = async () => {
+  // 1. Cover Photo Handlers (Compulsory)
+  const handlePickCoverPhoto = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Gallery Permission Required',
-          'Please allow access to your photos/gallery in device settings to select and upload product images.',
-          [{ text: 'OK' }]
-        );
-        toast.show('Please grant gallery permission in settings', 'warning');
+        Alert.alert('Permission Required', 'Please allow gallery access to upload cover photo.');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
+        allowsMultipleSelection: false,
         quality: 0.85,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const pickedAsset = result.assets[0];
-        setUploadingImage(true);
-        // Instant visual feedback with local URI
-        setImageUrl(pickedAsset.uri);
-
+        setUploadingCover(true);
         try {
-          if (activeBrandId) {
-            const uploadedUrl = await compressAndUploadDealImage(activeBrandId, pickedAsset.uri);
-            if (uploadedUrl) {
-              setImageUrl(uploadedUrl);
-            }
-          }
-        } catch (uploadErr) {
-          console.warn('[Posts] Supabase storage upload fallback:', uploadErr);
+          const finalUri = await compressAndUploadDealImage(
+            activeBrandId || 'brand-generic',
+            result.assets[0].uri
+          );
+          setCoverPhoto(finalUri || result.assets[0].uri);
+          toast.show('Main Cover photo uploaded! ⭐', 'success');
+        } catch {
+          setCoverPhoto(result.assets[0].uri);
+        } finally {
+          setUploadingCover(false);
         }
-        toast.show('Photo selected from gallery! 📸', 'success');
       }
     } catch (err: any) {
-      toast.show(err.message || 'Could not open gallery', 'error');
-    } finally {
-      setUploadingImage(false);
+      toast.show(err.message || 'Could not pick cover photo', 'error');
+      setUploadingCover(false);
     }
+  };
+
+  const handleSetCoverPhotoUrl = () => {
+    const trimmed = coverPhotoInputUrl.trim();
+    if (!trimmed) {
+      toast.show('Please enter a valid image URL for cover', 'warning');
+      return;
+    }
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('data:')) {
+      toast.show('URL must start with http:// or https://', 'warning');
+      return;
+    }
+    setCoverPhoto(trimmed);
+    setCoverPhotoInputUrl('');
+    toast.show('Main Cover photo set! ⭐', 'success');
+  };
+
+  const handleRemoveCoverPhoto = () => {
+    setCoverPhoto('');
+    toast.show('Cover photo removed', 'info');
+  };
+
+  // 2. Extra Photos Handlers (Optional - up to 5)
+  const handlePickExtraPhotos = async () => {
+    if (extraPhotos.length >= 5) {
+      toast.show('Maximum 5 extra photos allowed.', 'warning');
+      return;
+    }
+
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please allow gallery access to upload extra photos.');
+        return;
+      }
+
+      const remainingLimit = 5 - extraPhotos.length;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: remainingLimit,
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setUploadingExtra(true);
+        const uploaded: string[] = [];
+
+        for (const asset of result.assets) {
+          try {
+            const finalUri = await compressAndUploadDealImage(
+              activeBrandId || 'brand-generic',
+              asset.uri
+            );
+            if (finalUri) uploaded.push(finalUri);
+          } catch {
+            uploaded.push(asset.uri);
+          }
+        }
+
+        if (uploaded.length > 0) {
+          setExtraPhotos((prev) => [...prev, ...uploaded].slice(0, 5));
+          toast.show(`${uploaded.length} extra photo(s) added! 📸`, 'success');
+        }
+      }
+    } catch (err: any) {
+      toast.show(err.message || 'Could not pick extra photos', 'error');
+    } finally {
+      setUploadingExtra(false);
+    }
+  };
+
+  const handleAddExtraPhotoUrl = () => {
+    const trimmed = extraPhotoInputUrl.trim();
+    if (!trimmed) {
+      toast.show('Please enter a valid extra photo URL', 'warning');
+      return;
+    }
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('data:')) {
+      toast.show('URL must start with http:// or https://', 'warning');
+      return;
+    }
+    if (extraPhotos.length >= 5) {
+      toast.show('Maximum 5 extra photos allowed', 'warning');
+      return;
+    }
+    setExtraPhotos((prev) => [...prev, trimmed]);
+    setExtraPhotoInputUrl('');
+    toast.show('Extra angle photo added! 🖼️', 'success');
+  };
+
+  const handleMoveExtraPhoto = (fromIndex: number, direction: 'left' | 'right') => {
+    const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1;
+    if (toIndex < 0 || toIndex >= extraPhotos.length) return;
+    setExtraPhotos((prev) => {
+      const copy = [...prev];
+      const temp = copy[fromIndex];
+      copy[fromIndex] = copy[toIndex];
+      copy[toIndex] = temp;
+      return copy;
+    });
+  };
+
+  const handleRemoveExtraPhoto = (index: number) => {
+    setExtraPhotos((prev) => prev.filter((_, i) => i !== index));
+    toast.show('Extra photo removed', 'info');
   };
 
   // AI Promotional Copy Generator Handler (Gemini)
@@ -426,6 +674,16 @@ export default function BrandPostsScreen() {
       return;
     }
 
+    if (!coverPhoto.trim()) {
+      toast.show('Main Cover Photo lazmi (compulsory) hai! Baraye meharbani cover photo upload ya enter karein.', 'error');
+      return;
+    }
+
+    const finalImageUrls = [
+      coverPhoto.trim(),
+      ...extraPhotos.map((p) => p.trim()).filter(Boolean),
+    ];
+
     const origPriceNum = parseFloat(originalPrice) || 10000;
     const pctNum = parseFloat(discountPct) || 20;
     const calcDiscountPrice = Math.round(origPriceNum * (1 - pctNum / 100));
@@ -436,12 +694,24 @@ export default function BrandPostsScreen() {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val || '');
 
       const CATEGORY_MAP: Record<string, string> = {
+        'Fashion & Apparel': '11111111-1111-1111-1111-111111111111',
         Fashion: '11111111-1111-1111-1111-111111111111',
+        'Footwear & Accessories': '77777777-7777-7777-7777-777777777777',
+        Footwear: '77777777-7777-7777-7777-777777777777',
         Shoes: '77777777-7777-7777-7777-777777777777',
-        Electronics: '22222222-2222-2222-2222-222222222222',
-        Beauty: '55555555-5555-5555-5555-555555555555',
         Accessories: '77777777-7777-7777-7777-777777777777',
+        'Electronics & Mobiles': '22222222-2222-2222-2222-222222222222',
+        Electronics: '22222222-2222-2222-2222-222222222222',
+        'Food & Dining': '33333333-3333-3333-3333-333333333333',
         Food: '33333333-3333-3333-3333-333333333333',
+        'Beauty & Cosmetics': '55555555-5555-5555-5555-555555555555',
+        Beauty: '55555555-5555-5555-5555-555555555555',
+        'Grocery & Supermarket': '44444444-4444-4444-4444-444444444444',
+        Grocery: '44444444-4444-4444-4444-444444444444',
+        'Home & Living': '66666666-6666-6666-6666-666666666666',
+        Home: '66666666-6666-6666-6666-666666666666',
+        'Travel & Experiences': '88888888-8888-8888-8888-888888888888',
+        Travel: '88888888-8888-8888-8888-888888888888',
       };
       const categoryId = CATEGORY_MAP[selectedCategory] || '11111111-1111-1111-1111-111111111111';
 
@@ -460,12 +730,15 @@ export default function BrandPostsScreen() {
         discount_price: calcDiscountPrice,
         status: postStatus,
         start_date: new Date().toISOString(),
-        end_date: saleLastDate ? new Date(saleLastDate).toISOString() : new Date(Date.now() + 14 * 86400000).toISOString(),
-        deal_type: storeAvailability === 'in_store' ? 'online' : 'in_store',
-        image_urls: [
-          imageUrl ||
-            'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=1000&q=80',
-        ],
+        end_date: saleLastDate
+          ? (/^\d{4}-\d{2}-\d{2}$/.test(saleLastDate)
+              ? new Date(`${saleLastDate}T23:59:59.999Z`).toISOString()
+              : new Date(saleLastDate).toISOString())
+          : new Date(Date.now() + 14 * 86400000).toISOString(),
+        deal_type: dealType,
+        city: selectedCity || 'All Pakistan',
+        image_urls: finalImageUrls,
+        banner_url: coverPhoto.trim(),
         brand_id: targetBrandId,
         category_id: categoryId,
         buy_url: buyUrl.trim() || null,
@@ -488,8 +761,10 @@ export default function BrandPostsScreen() {
         status: postStatus,
         start_date: payload.start_date,
         end_date: payload.end_date,
-        deal_type: payload.deal_type,
+        deal_type: dealType,
+        city: selectedCity || 'All Pakistan',
         image_urls: payload.image_urls,
+        banner_url: payload.banner_url,
         buy_url: payload.buy_url,
         website_url: payload.website_url,
       };
@@ -509,6 +784,49 @@ export default function BrandPostsScreen() {
           await (supabase.from('deals') as any).upsert(dbRow, { onConflict: 'id' });
         }
         toast.show('New post published live to database! 🚀', 'success');
+
+        // Genuine notifications for: Brand, Admin, and Brand Followers
+        try {
+          // 1. Notify Brand
+          await createNotification({
+            role: 'brand',
+            userId: targetBrandId,
+            brand_id: targetBrandId,
+            deal_id: dealId,
+            category: 'deal',
+            title: 'Deal Published! 🚀',
+            body: `Aapki deal "${payload.title}" successfully live publish ho chuki hai.`,
+            action_url: '/(brand)/posts',
+          });
+
+          // 2. Notify Admin
+          await createNotification({
+            role: 'admin',
+            userId: 'admin',
+            deal_id: dealId,
+            category: 'moderation',
+            title: 'New Deal Moderation Queue',
+            body: `${brand?.name || 'Brand'} ne new promotion "${payload.title}" publish ki hai review ke liye.`,
+            action_url: 'deals_queue',
+          });
+
+          // 3. Notify all followers of this brand
+          const followerIds = await getBrandFollowers(targetBrandId);
+          for (const followerId of followerIds) {
+            await createNotification({
+              role: 'consumer',
+              userId: followerId,
+              brand_id: targetBrandId,
+              deal_id: dealId,
+              category: 'deal',
+              title: `${brand?.name || 'Followed Brand'}: New Deal Live! 🔥`,
+              body: `${brand?.name || 'Brand'} ne new deal "${payload.title}" (${payload.discount_pct}% OFF) live kar di hai!`,
+              action_url: `/(consumer)/deal/${dealId}`,
+            });
+          }
+        } catch (notifErr) {
+          console.warn('[posts] Notification dispatch notice:', notifErr);
+        }
       }
 
       setCreateModalOpen(false);
@@ -653,8 +971,64 @@ export default function BrandPostsScreen() {
         </View>
       )}
 
+      {/* ─── STATUS FILTER TABS (All / Active / Paused / Expired) ─── */}
+      {selectionMode === 'none' && (
+        <View style={styles.filterTabsRow}>
+          <Pressable
+            style={[styles.filterTab, postFilterTab === 'all' && styles.filterTabActive]}
+            onPress={() => setPostFilterTab('all')}>
+            <Text
+              style={[
+                styles.filterTabText,
+                postFilterTab === 'all' && styles.filterTabTextActive,
+              ]}>
+              All ({deals.length})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterTab, postFilterTab === 'active' && styles.filterTabActive]}
+            onPress={() => setPostFilterTab('active')}>
+            <View style={styles.tabDotActive} />
+            <Text
+              style={[
+                styles.filterTabText,
+                postFilterTab === 'active' && styles.filterTabTextActive,
+              ]}>
+              Active ({activeCount})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterTab, postFilterTab === 'paused' && styles.filterTabActive]}
+            onPress={() => setPostFilterTab('paused')}>
+            <View style={[styles.tabDotActive, { backgroundColor: '#F59E0B' }]} />
+            <Text
+              style={[
+                styles.filterTabText,
+                postFilterTab === 'paused' && styles.filterTabTextActive,
+              ]}>
+              Paused ({pausedCount})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.filterTab, postFilterTab === 'expired' && styles.filterTabActive]}
+            onPress={() => setPostFilterTab('expired')}>
+            <View style={styles.tabDotExpired} />
+            <Text
+              style={[
+                styles.filterTabText,
+                postFilterTab === 'expired' && styles.filterTabTextActive,
+              ]}>
+              Expired ({expiredCount})
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* ─── POSTS FEED LIST ─── */}
-      {isLoading ? (
+      {isLoading && displayPosts.length === 0 ? (
         <View style={styles.loadingCenter}>
           <ActivityIndicator size="large" color="#00FF66" />
         </View>
@@ -673,14 +1047,27 @@ export default function BrandPostsScreen() {
           }
           ListEmptyComponent={
             <EmptyState
-              title="No Promotions Posted"
-              description="No promotions found in your brand account. Tap 'Create New Post' from the top right menu to publish an offer."
+              title={
+                postFilterTab === 'expired'
+                  ? 'No Expired Deals'
+                  : postFilterTab === 'active'
+                  ? 'No Active Deals'
+                  : 'No Promotions Posted'
+              }
+              description={
+                postFilterTab === 'expired'
+                  ? 'None of your promotions have expired. All running promotions are currently active!'
+                  : postFilterTab === 'active'
+                  ? 'You currently have no active promotions running. Tap "Create New Post" to launch a sale.'
+                  : "No promotions found in your brand account. Tap 'Create New Post' from the top right menu to publish an offer."
+              }
               icon="documents-outline"
             />
           }
           renderItem={({ item }) => {
             const isSelected = selectedPostIds.includes(item.id);
-            const isEnded = item.status === 'expired';
+            const isEnded = isDealExpired(item);
+            const daysLeft = getDealRemainingDays(item);
             const bannerUri =
               item.image_urls?.[0] ||
               'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=1000&q=80';
@@ -707,6 +1094,14 @@ export default function BrandPostsScreen() {
                     });
                   }
                 }}>
+                {/* 0. Pinned / Featured Ribbon */}
+                {Boolean(item.is_pinned) && (
+                  <View style={styles.pinnedRibbon}>
+                    <Ionicons name="pin" size={11} color="#090A0E" />
+                    <Text style={styles.pinnedRibbonText}>PINNED / FEATURED PROMOTION</Text>
+                  </View>
+                )}
+
                 {/* 1. Post Header Row */}
                 <View style={styles.cardHeaderRow}>
                   <View style={styles.brandAvatarRing}>
@@ -760,6 +1155,19 @@ export default function BrandPostsScreen() {
                 <View style={styles.mediaContainer}>
                   <Image source={{ uri: bannerUri }} style={styles.mediaImage} />
 
+                  {/* Real Live Urgency Countdown Timer Overlay */}
+                  <View style={styles.timerMediaOverlay}>
+                    <DealLiveTimer
+                      dealId={item.id}
+                      endDate={item.end_date}
+                      status={item.status}
+                      onExpire={() => {
+                        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+                      }}
+                      compact
+                    />
+                  </View>
+
                   {/* SALE ENDED Translucent Overlay (Screenshot 1) */}
                   {isEnded && (
                     <View style={styles.saleEndedOverlay}>
@@ -769,23 +1177,49 @@ export default function BrandPostsScreen() {
                       </View>
                     </View>
                   )}
+
+                  {/* PAUSED Translucent Overlay */}
+                  {item.status === 'paused' && !isEnded && (
+                    <View style={styles.saleEndedOverlay}>
+                      <View style={[styles.saleEndedBadge, { backgroundColor: '#F59E0B25', borderColor: '#F59E0B' }]}>
+                        <Ionicons name="pause-circle" size={14} color="#F59E0B" />
+                        <Text style={[styles.saleEndedText, { color: '#F59E0B' }]}>PAUSED (OUT OF STOCK)</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* 3. Post Details Body */}
                 <View style={styles.cardBody}>
                   <View style={styles.titleRow}>
-                    <Text style={styles.postTitle}>{item.title}</Text>
+                    <Text style={styles.postTitle}>
+                      {(item.title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim()}
+                    </Text>
                     <View
                       style={[
                         styles.statusBadge,
-                        isEnded ? styles.statusBadgeEnded : styles.statusBadgeActive,
+                        isEnded
+                          ? styles.statusBadgeEnded
+                          : item.status === 'paused'
+                          ? styles.statusBadgePaused
+                          : styles.statusBadgeActive,
                       ]}>
                       <Text
                         style={[
                           styles.statusBadgeText,
-                          isEnded ? { color: '#EF4444' } : { color: '#00FF66' },
+                          isEnded
+                            ? { color: '#EF4444' }
+                            : item.status === 'paused'
+                            ? { color: '#F59E0B' }
+                            : { color: '#00FF66' },
                         ]}>
-                        {isEnded ? 'ENDED' : 'ACTIVE'}
+                        {isEnded
+                          ? 'ENDED'
+                          : item.status === 'paused'
+                          ? 'PAUSED'
+                          : daysLeft !== null && daysLeft <= 2
+                          ? `ENDING SOON (${daysLeft}d)`
+                          : 'ACTIVE'}
                       </Text>
                     </View>
                   </View>
@@ -794,8 +1228,48 @@ export default function BrandPostsScreen() {
                     {item.description}
                   </Text>
 
+                  {/* Quick Extend / Reactivate Button for Ended Deals */}
+                  {isEnded && selectionMode === 'none' && (
+                    <Pressable
+                      style={styles.extendDealBtn}
+                      hitSlop={6}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenCreateModal(item, true);
+                      }}>
+                      <Ionicons name="refresh" size={13} color="#38BDF8" />
+                      <Text style={styles.extendDealBtnText}>Extend Deal / Reactivate</Text>
+                    </Pressable>
+                  )}
+
                   {/* Price Row with Strikethrough */}
                   <Text style={styles.postPriceText}>{origPriceFormatted}</Text>
+
+                  {/* Matching User Preferences Tags (City & Deal Type) */}
+                  <View style={styles.preferenceTagsRow}>
+                    <View style={styles.prefTag}>
+                      <Ionicons name="location-outline" size={11} color="#00FF66" />
+                      <Text style={styles.prefTagText}>{item.city || 'All Pakistan'}</Text>
+                    </View>
+                    <View style={styles.prefTag}>
+                      <Ionicons
+                        name={item.deal_type === 'in_store' ? 'storefront-outline' : 'globe-outline'}
+                        size={11}
+                        color="#38BDF8"
+                      />
+                      <Text style={[styles.prefTagText, { color: '#38BDF8' }]}>
+                        {item.deal_type === 'in_store' ? 'In-Store Outlets' : 'Online Only'}
+                      </Text>
+                    </View>
+                    {Boolean(item.discount_pct) && (
+                      <View style={styles.prefTag}>
+                        <Ionicons name="pricetag-outline" size={11} color="#F59E0B" />
+                        <Text style={[styles.prefTagText, { color: '#F59E0B' }]}>
+                          {item.discount_pct}% OFF
+                        </Text>
+                      </View>
+                    )}
+                  </View>
 
                   {/* Buy Link Badge */}
                   {Boolean(item.buy_url || (item as any).website_url) && (
@@ -896,6 +1370,110 @@ export default function BrandPostsScreen() {
                     );
                   })()}
                 </View>
+
+                {/* 5. Quick Actions Row (Pin, Pause, +3d, +7d, Clone, Insights) */}
+                {selectionMode === 'none' && (
+                  <View style={styles.cardQuickActionsBar}>
+                    {/* Pin / Unpin */}
+                    <Pressable
+                      style={[
+                        styles.quickActionChip,
+                        item.is_pinned && styles.quickActionChipPinned,
+                      ]}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleTogglePin(item);
+                      }}>
+                      <Ionicons
+                        name={item.is_pinned ? 'pin' : 'pin-outline'}
+                        size={12}
+                        color={item.is_pinned ? '#090A0E' : '#94A3B8'}
+                      />
+                      <Text
+                        style={[
+                          styles.quickActionChipText,
+                          item.is_pinned && styles.quickActionChipTextPinned,
+                        ]}>
+                        {item.is_pinned ? 'Pinned' : 'Pin'}
+                      </Text>
+                    </Pressable>
+
+                    {/* Pause / Resume */}
+                    <Pressable
+                      style={[
+                        styles.quickActionChip,
+                        item.status === 'paused' && styles.quickActionChipPaused,
+                      ]}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleTogglePause(item);
+                      }}>
+                      <Ionicons
+                        name={item.status === 'paused' ? 'play-outline' : 'pause-outline'}
+                        size={12}
+                        color={item.status === 'paused' ? '#00FF66' : '#F59E0B'}
+                      />
+                      <Text
+                        style={[
+                          styles.quickActionChipText,
+                          item.status === 'paused' && { color: '#00FF66' },
+                          item.status !== 'paused' && { color: '#F59E0B' },
+                        ]}>
+                        {item.status === 'paused' ? 'Resume' : 'Pause'}
+                      </Text>
+                    </Pressable>
+
+                    {/* +3d */}
+                    <Pressable
+                      style={styles.quickActionChip}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleQuickExtend(item.id, 3);
+                      }}>
+                      <Ionicons name="add-circle-outline" size={12} color="#38BDF8" />
+                      <Text style={[styles.quickActionChipText, { color: '#38BDF8' }]}>+3d</Text>
+                    </Pressable>
+
+                    {/* +7d */}
+                    <Pressable
+                      style={styles.quickActionChip}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleQuickExtend(item.id, 7);
+                      }}>
+                      <Ionicons name="calendar-outline" size={12} color="#38BDF8" />
+                      <Text style={[styles.quickActionChipText, { color: '#38BDF8' }]}>+7d</Text>
+                    </Pressable>
+
+                    {/* Clone */}
+                    <Pressable
+                      style={styles.quickActionChip}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDuplicate(item.id);
+                      }}>
+                      <Ionicons name="copy-outline" size={12} color="#A78BFA" />
+                      <Text style={[styles.quickActionChipText, { color: '#A78BFA' }]}>Clone</Text>
+                    </Pressable>
+
+                    {/* Insights */}
+                    <Pressable
+                      style={[styles.quickActionChip, styles.insightsActionChip]}
+                      hitSlop={4}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setInsightsDeal(item);
+                      }}>
+                      <Ionicons name="bar-chart-outline" size={12} color="#00FF66" />
+                      <Text style={[styles.quickActionChipText, { color: '#00FF66' }]}>Insights</Text>
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* Edit Mode Interactive Bar */}
                 {selectionMode === 'edit' && (
@@ -1000,6 +1578,7 @@ export default function BrandPostsScreen() {
         <Pressable
           style={[styles.fabBtn, speedDialOpen && styles.fabBtnOpen]}
           onPress={() => setSpeedDialOpen(!speedDialOpen)}
+          accessibilityLabel="Open Actions Menu"
           hitSlop={8}>
           <Ionicons
             name={speedDialOpen ? 'close' : 'add'}
@@ -1027,98 +1606,208 @@ export default function BrandPostsScreen() {
           </View>
 
           <ScrollView contentContainerStyle={styles.createModalForm} showsVerticalScrollIndicator={false}>
-            {/* 1. Product Image with Live Preview + URL input + Presets */}
-            <View style={styles.labelRow}>
-              <View style={styles.greenDot} />
-              <Text style={styles.formSectionLabel}>Product Image (Pic)</Text>
-            </View>
-
-            {imageUrl ? (
-              <View style={styles.imagePreviewWrap}>
-                <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
-                {uploadingImage && (
-                  <View style={styles.uploadingOverlay}>
-                    <ActivityIndicator size="small" color="#00FF66" />
-                    <Text style={styles.uploadingText}>Saving photo...</Text>
-                  </View>
-                )}
-                <View style={styles.imageActionButtons}>
-                  <Pressable
-                    style={styles.changeImageBtn}
-                    onPress={handlePickImage}
-                    disabled={uploadingImage}>
-                    <Ionicons name="images-outline" size={14} color="#00FF66" />
-                    <Text style={styles.changeImageText}>Gallery</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.clearImageBtn}
-                    onPress={() => setImageUrl('')}>
-                    <Ionicons name="close-circle" size={14} color="#FF4D4D" />
-                    <Text style={styles.clearImageText}>Remove</Text>
-                  </Pressable>
+            {/* ─── SECTION 1: MAIN COVER PHOTO (COMPULSORY / LAZMI) ─── */}
+            <View style={styles.sectionCardBox}>
+              <View style={styles.photosHeaderRow}>
+                <View style={styles.labelRow}>
+                  <View style={styles.greenDot} />
+                  <Text style={styles.formSectionLabel}>Main Cover Photo</Text>
+                  <Text style={styles.requiredStar}>*</Text>
+                </View>
+                <View style={[styles.compulsoryBadge, !coverPhoto && styles.compulsoryBadgePending]}>
+                  <Ionicons
+                    name={coverPhoto ? 'checkmark-circle' : 'alert-circle'}
+                    size={12}
+                    color={coverPhoto ? '#00FF66' : '#FF4D4D'}
+                  />
+                  <Text style={[styles.compulsoryBadgeText, !coverPhoto && { color: '#FF4D4D' }]}>
+                    {coverPhoto ? 'Cover Set' : 'Required / Lazmi'}
+                  </Text>
                 </View>
               </View>
-            ) : (
-              <Pressable
-                style={styles.uploadDropzone}
-                onPress={handlePickImage}
-                disabled={uploadingImage}>
-                {uploadingImage ? (
-                  <View style={{ alignItems: 'center', gap: 6 }}>
-                    <ActivityIndicator size="small" color="#00FF66" />
-                    <Text style={styles.uploadDropzoneText}>Opening gallery...</Text>
-                  </View>
-                ) : (
-                  <>
-                    <View style={styles.uploadIconBadge}>
-                      <Ionicons name="images" size={24} color="#00FF66" />
-                    </View>
-                    <Text style={styles.uploadDropzoneTitle}>Tap to pick from device gallery</Text>
-                    <Text style={styles.uploadDropzoneText}>Tap here to select product picture from your phone</Text>
-                  </>
-                )}
-              </Pressable>
-            )}
+              <Text style={styles.helpText}>
+                Yeh main banner photo hai jo Home Feed, Explore aur cards par laazmi show hogi.
+              </Text>
 
-            {/* Custom Image URL TextInput */}
-            <View style={styles.urlInputRow}>
-              <Ionicons name="image-outline" size={16} color="#64748B" />
-              <TextInput
-                style={styles.urlInput}
-                placeholder="Or paste direct image URL (https://...)"
-                placeholderTextColor="#64748B"
-                value={imageUrl}
-                onChangeText={setImageUrl}
-                autoCapitalize="none"
-              />
+              {coverPhoto ? (
+                <View style={styles.coverPreviewCard}>
+                  <Image source={{ uri: coverPhoto }} style={styles.coverPreviewImage} />
+                  <View style={styles.coverPhotoTopBadge}>
+                    <Ionicons name="star" size={11} color="#090A0E" />
+                    <Text style={styles.coverPhotoTopBadgeText}>MAIN COVER PHOTO</Text>
+                  </View>
+                  <View style={styles.coverActionButtons}>
+                    <Pressable
+                      style={styles.changeCoverBtn}
+                      onPress={handlePickCoverPhoto}
+                      disabled={uploadingCover}>
+                      <Ionicons name="camera-outline" size={13} color="#00FF66" />
+                      <Text style={styles.changeCoverText}>Change</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.removeCoverBtn}
+                      onPress={handleRemoveCoverPhoto}
+                      hitSlop={6}>
+                      <Ionicons name="trash-outline" size={13} color="#FF4D4D" />
+                      <Text style={styles.removeCoverText}>Remove</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.emptyCoverContainer}>
+                  <Pressable
+                    style={[styles.uploadDropzone, styles.coverDropzone]}
+                    onPress={handlePickCoverPhoto}
+                    disabled={uploadingCover}>
+                    {uploadingCover ? (
+                      <View style={{ alignItems: 'center', gap: 6 }}>
+                        <ActivityIndicator size="small" color="#00FF66" />
+                        <Text style={styles.uploadDropzoneText}>Saving cover photo...</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={styles.uploadIconBadge}>
+                          <Ionicons name="camera" size={24} color="#00FF66" />
+                        </View>
+                        <Text style={styles.uploadDropzoneTitle}>Upload Main Cover Photo *</Text>
+                        <Text style={styles.uploadDropzoneText}>
+                          Tap to select primary banner photo from phone gallery or files
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  {/* Direct Cover URL input */}
+                  <View style={styles.urlAddRow}>
+                    <Ionicons name="link-outline" size={16} color="#64748B" />
+                    <TextInput
+                      style={styles.urlInput}
+                      placeholder="Or paste direct Cover Photo URL (https://...)"
+                      placeholderTextColor="#64748B"
+                      value={coverPhotoInputUrl}
+                      onChangeText={setCoverPhotoInputUrl}
+                      autoCapitalize="none"
+                    />
+                    <Pressable
+                      style={[styles.addUrlBtn, !coverPhotoInputUrl.trim() && { opacity: 0.5 }]}
+                      onPress={handleSetCoverPhotoUrl}
+                      disabled={!coverPhotoInputUrl.trim()}>
+                      <Ionicons name="checkmark" size={14} color="#090A0E" />
+                      <Text style={styles.addUrlBtnText}>Set Cover</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
             </View>
 
-            {/* Quick Preset Images Selector */}
-            <Text style={styles.formSubLabel}>Or choose from preset product images:</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
-              {PRESET_IMAGES.map((img, idx) => (
-                <Pressable
-                  key={idx}
-                  style={[
-                    styles.presetThumb,
-                    imageUrl === img.url && styles.presetThumbSelected,
-                  ]}
-                  onPress={() => setImageUrl(img.url)}>
-                  <Image source={{ uri: img.url }} style={styles.presetThumbImg} />
-                  <Text
-                    style={[
-                      styles.presetThumbLabel,
-                      imageUrl === img.url && styles.presetThumbLabelSelected,
-                    ]}
-                    numberOfLines={1}>
-                    {img.label}
+            {/* ─── SECTION 2: ADDITIONAL PRODUCT PHOTOS (DIFFERENT OPTION - UP TO 5) ─── */}
+            <View style={[styles.sectionCardBox, { marginTop: 4 }]}>
+              <View style={styles.photosHeaderRow}>
+                <View style={styles.labelRow}>
+                  <View style={[styles.greenDot, { backgroundColor: '#38BDF8' }]} />
+                  <Text style={styles.formSectionLabel}>Additional Photos ({extraPhotos.length}/5)</Text>
+                  <Text style={styles.optionalBadgeText}>(Optional)</Text>
+                </View>
+                <View style={[styles.photoCounterBadge, extraPhotos.length > 0 && styles.photoCounterBadgeActive]}>
+                  <Text style={[styles.photoCounterText, extraPhotos.length > 0 && styles.photoCounterTextActive]}>
+                    {extraPhotos.length === 0 ? '0 of 5 added' : `${extraPhotos.length} of 5 added`}
                   </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+                </View>
+              </View>
+              <Text style={styles.helpText}>
+                Amazon-style swipe gallery ke liye mazeed 5 mukhtalif angles ya pics add karein (Side, Back, Model, Detail view).
+              </Text>
+
+              {/* Extra Photos Thumbnails Row */}
+              {extraPhotos.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.uploadedPhotosRow}>
+                  {extraPhotos.map((url, idx) => (
+                    <View key={url + idx} style={styles.photoCardWrap}>
+                      <Image source={{ uri: url }} style={styles.photoCardThumb} />
+                      <View style={[styles.photoBadge, styles.photoBadgeExtra]}>
+                        <Ionicons name="images" size={10} color="#FFFFFF" />
+                        <Text style={styles.photoBadgeText}>Angle #{idx + 1}</Text>
+                      </View>
+                      <View style={styles.photoCardActions}>
+                        <View style={{ flexDirection: 'row', gap: 4, marginLeft: 'auto' }}>
+                          {idx > 0 && (
+                            <Pressable
+                              style={styles.orderArrowBtn}
+                              onPress={() => handleMoveExtraPhoto(idx, 'left')}
+                              hitSlop={4}>
+                              <Ionicons name="chevron-back" size={12} color="#FFFFFF" />
+                            </Pressable>
+                          )}
+                          {idx < extraPhotos.length - 1 && (
+                            <Pressable
+                              style={styles.orderArrowBtn}
+                              onPress={() => handleMoveExtraPhoto(idx, 'right')}
+                              hitSlop={4}>
+                              <Ionicons name="chevron-forward" size={12} color="#FFFFFF" />
+                            </Pressable>
+                          )}
+                          <Pressable
+                            style={styles.removePhotoBtn}
+                            onPress={() => handleRemoveExtraPhoto(idx)}
+                            hitSlop={4}>
+                            <Ionicons name="trash-outline" size={12} color="#FF4D4D" />
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : null}
+
+              {/* Add Extra Photos Controls */}
+              {extraPhotos.length < 5 ? (
+                <View style={styles.addPhotosContainer}>
+                  <Pressable
+                    style={styles.addExtraPhotoBox}
+                    onPress={handlePickExtraPhotos}
+                    disabled={uploadingExtra}>
+                    {uploadingExtra ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <ActivityIndicator size="small" color="#38BDF8" />
+                        <Text style={[styles.uploadDropzoneText, { color: '#38BDF8' }]}>Adding extra angles...</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Ionicons name="add-circle-outline" size={20} color="#38BDF8" />
+                        <Text style={styles.addExtraPhotoText}>
+                          {extraPhotos.length === 0
+                            ? '+ Add Extra Photos from Device (up to 5)'
+                            : `+ Add More Angles (${5 - extraPhotos.length} remaining)`}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  {/* Direct Extra URL input */}
+                  <View style={styles.urlAddRow}>
+                    <Ionicons name="link-outline" size={16} color="#64748B" />
+                    <TextInput
+                      style={styles.urlInput}
+                      placeholder="Or paste extra photo URL (https://...)"
+                      placeholderTextColor="#64748B"
+                      value={extraPhotoInputUrl}
+                      onChangeText={setExtraPhotoInputUrl}
+                      autoCapitalize="none"
+                    />
+                    <Pressable
+                      style={[styles.addUrlBtn, !extraPhotoInputUrl.trim() && { opacity: 0.5 }, { backgroundColor: '#38BDF8' }]}
+                      onPress={handleAddExtraPhotoUrl}
+                      disabled={!extraPhotoInputUrl.trim()}>
+                      <Ionicons name="add" size={14} color="#090A0E" />
+                      <Text style={styles.addUrlBtnText}>Add</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+            </View>
 
             {/* 2. Product Name with AI Generator Trigger */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
@@ -1226,6 +1915,25 @@ export default function BrandPostsScreen() {
                   onChangeText={setDiscountPct}
                   keyboardType="numeric"
                 />
+                <View style={{ flexDirection: 'row', gap: 4, marginTop: 6 }}>
+                  {DISCOUNT_PRESETS.map((pct) => (
+                    <Pressable
+                      key={pct}
+                      style={[
+                        styles.discountPresetChip,
+                        discountPct === String(pct) && styles.discountPresetChipActive,
+                      ]}
+                      onPress={() => setDiscountPct(String(pct))}>
+                      <Text
+                        style={[
+                          styles.discountPresetChipText,
+                          discountPct === String(pct) && styles.discountPresetChipTextActive,
+                        ]}>
+                        {pct}%
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             </View>
 
@@ -1335,53 +2043,93 @@ export default function BrandPostsScreen() {
               ))}
             </View>
 
-            {/* 8. Store Availability */}
+            {/* 8. Deal Type (Matches User Filter) */}
             <View style={styles.labelRow}>
               <View style={styles.greenDot} />
-              <Text style={styles.formSectionLabel}>Store Availability</Text>
+              <Text style={styles.formSectionLabel}>Deal Type (User Preference Match)</Text>
             </View>
             <View style={styles.segmentContainer}>
               <Pressable
                 style={[
                   styles.segmentTab,
-                  storeAvailability === 'in_store' && styles.segmentTabActive,
+                  dealType === 'online' && styles.segmentTabActive,
                 ]}
-                onPress={() => setStoreAvailability('in_store')}>
+                onPress={() => setDealType('online')}>
                 <Ionicons
-                  name="storefront-outline"
-                  size={14}
-                  color={storeAvailability === 'in_store' ? '#090A0E' : '#64748B'}
+                  name="globe-outline"
+                  size={15}
+                  color={dealType === 'online' ? '#090A0E' : '#00FF66'}
                 />
                 <Text
                   style={[
                     styles.segmentTabText,
-                    storeAvailability === 'in_store' && styles.segmentTabTextActive,
+                    dealType === 'online' && styles.segmentTabTextActive,
                   ]}>
-                  In-Store
+                  Online Only
                 </Text>
               </Pressable>
 
               <Pressable
                 style={[
                   styles.segmentTab,
-                  storeAvailability === 'physical' && styles.segmentTabActive,
+                  dealType === 'in_store' && styles.segmentTabActive,
                 ]}
-                onPress={() => setStoreAvailability('physical')}>
+                onPress={() => setDealType('in_store')}>
                 <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={storeAvailability === 'physical' ? '#090A0E' : '#64748B'}
+                  name="storefront-outline"
+                  size={15}
+                  color={dealType === 'in_store' ? '#090A0E' : '#00FF66'}
                 />
                 <Text
                   style={[
                     styles.segmentTabText,
-                    storeAvailability === 'physical' && styles.segmentTabTextActive,
+                    dealType === 'in_store' && styles.segmentTabTextActive,
                   ]}>
-                  Physical
+                  In-Store Outlets
                 </Text>
               </Pressable>
             </View>
-            <Text style={styles.helpText}>Product available for online ordering & physical stores</Text>
+            <Text style={styles.helpText}>
+              {dealType === 'online'
+                ? 'User portal me "Online Only" filter karne walay shoppers ko show hogi.'
+                : 'User portal me "In-Store Outlets" filter karne walay shoppers ko show hogi.'}
+            </Text>
+
+            {/* 9. City Location (Matches User Filter) */}
+            <View style={styles.labelRow}>
+              <View style={styles.greenDot} />
+              <Text style={styles.formSectionLabel}>City Location (User Preference Match)</Text>
+            </View>
+            <View style={styles.cityChipsGrid}>
+              {TARGET_PAKISTAN_CITIES.map((c) => {
+                const isSelected = selectedCity === c;
+                return (
+                  <Pressable
+                    key={c}
+                    style={[
+                      styles.cityChip,
+                      isSelected && styles.cityChipActive,
+                    ]}
+                    onPress={() => setSelectedCity(c)}>
+                    <Ionicons
+                      name="location-sharp"
+                      size={13}
+                      color={isSelected ? '#090A0E' : '#64748B'}
+                    />
+                    <Text
+                      style={[
+                        styles.cityChipText,
+                        isSelected && styles.cityChipTextActive,
+                      ]}>
+                      {c}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.helpText}>
+              Shopper jab apne shahar ka filter select kare ga to ossay yeh post priority se dikhe gi ("All Pakistan" deals sab ko show hoti hain).
+            </Text>
 
             {/* 9. Item Buy Page Link (Website URL) */}
             <View style={styles.labelRow}>
@@ -1570,6 +2318,19 @@ export default function BrandPostsScreen() {
           </View>
         </SafeAreaView>
       </Modal>
+
+      {/* ─── REAL POST INSIGHTS DRAWER ─── */}
+      <PostInsightsDrawer
+        deal={insightsDeal}
+        visible={Boolean(insightsDeal)}
+        onClose={() => setInsightsDeal(null)}
+        onExtend={handleQuickExtend}
+        onTogglePause={(id) => {
+          const d = deals.find((deal) => deal.id === id);
+          if (d) handleTogglePause(d);
+        }}
+        onDuplicate={handleDuplicate}
+      />
     </SafeAreaView>
   );
 }
@@ -1634,6 +2395,150 @@ const styles = StyleSheet.create({
   dropdownDivider: {
     height: 1,
     backgroundColor: '#1C202E',
+  },
+  filterTabsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    gap: spacing[2],
+    backgroundColor: '#090A0E',
+  },
+  filterTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.full,
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+  },
+  filterTabActive: {
+    backgroundColor: '#16281D',
+    borderColor: '#00FF66',
+  },
+  filterTabText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  filterTabTextActive: {
+    color: '#00FF66',
+    fontWeight: '800',
+  },
+  tabDotActive: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#00FF66',
+  },
+  tabDotExpired: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#EF4444',
+  },
+  extendDealBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  extendDealBtnText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#38BDF8',
+  },
+  cityChipsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  cityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radii.full,
+  },
+  cityChipActive: {
+    backgroundColor: '#00FF66',
+    borderColor: '#00FF66',
+  },
+  cityChipText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  cityChipTextActive: {
+    color: '#090A0E',
+    fontWeight: '900',
+  },
+  discountPresetChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: radii.sm,
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+  },
+  discountPresetChipActive: {
+    backgroundColor: '#00FF66',
+    borderColor: '#00FF66',
+  },
+  discountPresetChipText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  discountPresetChipTextActive: {
+    color: '#090A0E',
+    fontWeight: '900',
+  },
+  preferenceTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 2,
+  },
+  prefTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  prefTagText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00FF66',
   },
   selectionBanner: {
     flexDirection: 'row',
@@ -1874,10 +2779,80 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.3)',
   },
+  statusBadgePaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
   statusBadgeEnded: {
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  pinnedRibbon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  pinnedRibbonText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#090A0E',
+    letterSpacing: 0.8,
+  },
+  timerMediaOverlay: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 2,
+  },
+  cardQuickActionsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing[2],
+    paddingTop: spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: '#1A1E2B',
+  },
+  quickActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0F121C',
+    borderWidth: 1,
+    borderColor: '#202432',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+  },
+  quickActionChipPinned: {
+    backgroundColor: '#00FF66',
+    borderColor: '#00FF66',
+  },
+  quickActionChipPaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: '#F59E0B',
+  },
+  quickActionChipText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  quickActionChipTextPinned: {
+    color: '#090A0E',
+    fontWeight: '900',
+  },
+  insightsActionChip: {
+    backgroundColor: 'rgba(0, 255, 102, 0.08)',
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    marginLeft: 'auto',
   },
   statusBadgeText: {
     ...typography.caption,
@@ -1963,11 +2938,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: '#202432',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
+    ...Platform.select({
+      web: { boxShadow: '0px 2px 4px rgba(0,0,0,0.35)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.35,
+        shadowRadius: 4,
+        elevation: 4,
+      },
+    }),
   },
   speedDialLabelText: {
     ...typography.caption,
@@ -1981,11 +2961,16 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 6,
+    ...Platform.select({
+      web: { boxShadow: '0px 3px 6px rgba(0,0,0,0.35)' },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.35,
+        shadowRadius: 6,
+        elevation: 6,
+      },
+    }),
   },
   fabBtn: {
     position: 'absolute',
@@ -1997,18 +2982,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#00FF66',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#00FF66',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    elevation: 8,
+    ...Platform.select({
+      web: { boxShadow: '0px 4px 10px rgba(0,255,102,0.45)' },
+      default: {
+        shadowColor: '#00FF66',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.45,
+        shadowRadius: 10,
+        elevation: 8,
+      },
+    }),
     zIndex: 100,
   },
   fabBtnOpen: {
     backgroundColor: '#202432',
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.25)',
-    shadowColor: '#000',
+    ...Platform.select({
+      web: { boxShadow: '0px 4px 10px rgba(0,0,0,0.45)' },
+      default: {
+        shadowColor: '#000',
+      },
+    }),
   },
   selectionBottomBar: {
     position: 'absolute',
@@ -2109,30 +3104,291 @@ const styles = StyleSheet.create({
     color: '#00FF66',
     fontWeight: '700',
   },
-  imageActionButtons: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
+  sectionCardBox: {
+    backgroundColor: '#0D1018',
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: '#1E2333',
+    padding: spacing[3],
+    gap: spacing[2],
+  },
+  requiredStar: {
+    color: '#FF4D4D',
+    fontSize: 14,
+    fontWeight: '900',
+    marginLeft: 2,
+  },
+  compulsoryBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  compulsoryBadgePending: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  compulsoryBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#00FF66',
+    letterSpacing: 0.3,
+  },
+  optionalBadgeText: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#64748B',
+    marginLeft: 4,
+  },
+  coverPreviewCard: {
+    width: '100%',
+    height: 180,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1.5,
+    borderColor: '#00FF66',
+    backgroundColor: '#090A0E',
+  },
+  coverPreviewImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  coverPhotoTopBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  coverPhotoTopBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#090A0E',
+    letterSpacing: 0.5,
+  },
+  coverActionButtons: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
     gap: 6,
   },
-  changeImageBtn: {
+  changeCoverBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: 'rgba(9, 10, 14, 0.85)',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.4)',
   },
-  changeImageText: {
+  changeCoverText: {
     ...typography.caption,
     fontSize: 11,
-    color: '#00FF66',
     fontWeight: '700',
+    color: '#00FF66',
+  },
+  removeCoverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(9, 10, 14, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  removeCoverText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FF4D4D',
+  },
+  emptyCoverContainer: {
+    gap: 8,
+  },
+  coverDropzone: {
+    height: 110,
+    borderColor: 'rgba(0, 255, 102, 0.4)',
+  },
+  addExtraPhotoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(56, 189, 248, 0.4)',
+    borderRadius: radii.md,
+    paddingVertical: 12,
+  },
+  addExtraPhotoText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#38BDF8',
+  },
+  photosHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing[2],
+  },
+  photoCounterBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#141721',
+  },
+  photoCounterBadgeActive: {
+    borderColor: 'rgba(0, 255, 102, 0.4)',
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+  },
+  photoCounterText: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '700',
+  },
+  photoCounterTextActive: {
+    color: '#00FF66',
+  },
+  uploadedPhotosRow: {
+    gap: 12,
+    paddingVertical: 4,
+  },
+  photoCardWrap: {
+    width: 140,
+    borderRadius: 12,
+    backgroundColor: '#141721',
+    borderWidth: 1.5,
+    borderColor: '#202432',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoCardCoverWrap: {
+    borderColor: '#00FF66',
+    backgroundColor: '#0D1A12',
+  },
+  photoCardThumb: {
+    width: '100%',
+    height: 110,
+    backgroundColor: '#0A0C12',
+    resizeMode: 'cover',
+  },
+  photoBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  photoBadgeCover: {
+    backgroundColor: '#00FF66',
+  },
+  photoBadgeExtra: {
+    backgroundColor: 'rgba(9, 10, 14, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  photoBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  photoCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+    backgroundColor: '#141721',
+    borderTopWidth: 1,
+    borderTopColor: '#202432',
+  },
+  makeCoverBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  makeCoverText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#00FF66',
+  },
+  orderArrowBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    backgroundColor: '#202432',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removePhotoBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPhotosContainer: {
+    gap: 10,
+    marginTop: 4,
+  },
+  urlAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+    borderRadius: radii.md,
+    paddingHorizontal: spacing[3],
+    gap: spacing[2],
+  },
+  addUrlBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  addUrlBtnText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#090A0E',
   },
   formInput: {
     backgroundColor: '#141721',

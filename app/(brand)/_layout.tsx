@@ -2,13 +2,22 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 
+import {
+  emitBrandExploreTabReset,
+  emitBrandHomeTabReset,
+  emitBrandPostsTabReset,
+  emitBrandProfileTabReset,
+} from '@/lib/tabEvents';
 import { colors, typography } from '@/theme';
 
 export default function BrandLayout() {
   return (
     <Tabs
+      detachInactiveScreens={false}
       screenOptions={{
         headerShown: false,
+        lazy: true,
+        freezeOnBlur: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
@@ -27,6 +36,11 @@ export default function BrandLayout() {
       {/* 1. Home Tab */}
       <Tabs.Screen
         name="index"
+        listeners={() => ({
+          tabPress: () => {
+            emitBrandHomeTabReset();
+          },
+        })}
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
@@ -42,6 +56,11 @@ export default function BrandLayout() {
       {/* 2. Explore Tab */}
       <Tabs.Screen
         name="explore"
+        listeners={() => ({
+          tabPress: () => {
+            emitBrandExploreTabReset();
+          },
+        })}
         options={{
           title: 'Explore',
           tabBarIcon: ({ color, focused }) => (
@@ -57,6 +76,11 @@ export default function BrandLayout() {
       {/* 3. Posts Tab (Middle Tab - Upload, Delete, Edit) */}
       <Tabs.Screen
         name="posts"
+        listeners={() => ({
+          tabPress: () => {
+            emitBrandPostsTabReset();
+          },
+        })}
         options={{
           title: 'Posts',
           tabBarIcon: ({ color, focused }) => (
@@ -87,6 +111,11 @@ export default function BrandLayout() {
       {/* 5. Profile Tab */}
       <Tabs.Screen
         name="profile"
+        listeners={() => ({
+          tabPress: () => {
+            emitBrandProfileTabReset();
+          },
+        })}
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (

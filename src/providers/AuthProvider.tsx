@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
@@ -17,7 +18,7 @@ interface AuthContextType {
   continueAsGuest: () => void;
   bypassAsAdmin: () => void;
   bypassAsBrand: (email?: string, name?: string) => void;
-  bypassAsConsumer: (email?: string, name?: string) => void;
+  bypassAsConsumer: (email?: string, name?: string, customUserId?: string) => void;
   updateProfile: (data: Partial<Profile>) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -294,46 +295,63 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const bypassAsAdmin = () => {
     const adminId = 'a0000000-0000-0000-0000-000000000001';
-    setSession({} as any);
-    setUser({ id: adminId, email: 'admin@jumblesale.com' } as any);
-    setProfile({
+    const userObj = { id: adminId, email: 'admin@jumblesale.com' } as any;
+    const profileObj = {
       id: adminId,
       email: 'admin@jumblesale.com',
       display_name: 'System Admin',
-      role: 'admin',
+      role: 'admin' as const,
       is_active: true,
       created_at: new Date().toISOString(),
-    } as any);
+    } as any;
+    const sessionObj = { access_token: 'admin-bypass-token', user: userObj } as any;
+
+    setSession(sessionObj);
+    setUser(userObj);
+    setProfile(profileObj);
+    setBrand(null);
     setIsGuest(false);
     setIsLoading(false);
+
+    AsyncStorage.setItem(
+      '@jumble_sale_active_auth',
+      JSON.stringify({ user: userObj, profile: profileObj, brand: null })
+    ).catch(() => {});
   };
 
   const bypassAsBrand = (
     brandEmail: string = 'contact@khaadi.com',
     brandName: string = 'Khaadi'
   ) => {
-    // Map to verified brand seed UUIDs if available, otherwise deterministic UUID
     let brandId = 'b1111111-1111-1111-1111-111111111111';
     let userId = 'b0000000-0000-0000-0000-000000000001';
 
-    if (brandEmail.toLowerCase().includes('outfitter')) {
+    const bLower = brandEmail.toLowerCase();
+    if (bLower.includes('outfitter')) {
       brandId = 'b2222222-2222-2222-2222-222222222222';
       userId = 'b0000000-0000-0000-0000-000000000002';
-    } else if (brandEmail.toLowerCase().includes('gulahmed') || brandEmail.toLowerCase().includes('ahmed')) {
+    } else if (bLower.includes('gulahmed') || bLower.includes('gul_ahmed')) {
       brandId = 'b3333333-3333-3333-3333-333333333333';
       userId = 'b0000000-0000-0000-0000-000000000003';
+    } else {
+      userId = 'b0000000-0000-0000-0000-' + Math.abs(bLower.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16).padStart(12, '0');
+      brandId = 'b1111111-1111-1111-1111-' + Math.abs(bLower.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16).padStart(12, '0');
     }
 
-    setSession({} as any);
-    setUser({ id: userId, email: brandEmail } as any);
-    setProfile({
+    const userObj = { id: userId, email: brandEmail } as any;
+    const profileObj = {
       id: userId,
       email: brandEmail,
       display_name: brandName,
-      role: 'brand',
+      role: 'brand' as const,
       is_active: true,
       created_at: new Date().toISOString(),
-    } as any);
+    } as any;
+    const sessionObj = { access_token: 'brand-bypass-token', user: userObj } as any;
+
+    setSession(sessionObj);
+    setUser(userObj);
+    setProfile(profileObj);
 
     const initialBrand: Brand = {
       id: brandId,
@@ -356,12 +374,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsGuest(false);
     setIsLoading(false);
 
-    // Sync from local store so if admin approved it, the brand gets active status!
+    AsyncStorage.setItem(
+      '@jumble_sale_active_auth',
+      JSON.stringify({ user: userObj, profile: profileObj, brand: initialBrand })
+    ).catch(() => {});
+
+    // Sync from local store so if admin approved or altered it, the brand gets active status!
     getLocalBrands()
       .then((brands) => {
         const match = brands.find(
           (b) =>
             b.business_email?.toLowerCase() === brandEmail.toLowerCase() ||
+            b.name?.toLowerCase() === brandName.toLowerCase() ||
             b.id === brandId ||
             b.owner_id === userId
         );
@@ -370,6 +394,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setProfile((prev) =>
             prev ? { ...prev, display_name: match.name } : prev
           );
+          AsyncStorage.setItem(
+            '@jumble_sale_active_auth',
+            JSON.stringify({ user: userObj, profile: { ...profileObj, display_name: match.name }, brand: match })
+          ).catch(() => {});
         }
       })
       .catch((err) => console.warn('[AuthProvider] bypassAsBrand local sync notice:', err));
@@ -377,23 +405,44 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const bypassAsConsumer = (
     userEmail: string = 'zara.khan@gmail.com',
-    userName: string = 'Zara Khan'
+    userName: string = 'Zara Khan',
+    customUserId?: string
   ) => {
-    const userId = 'c0000000-0000-0000-0000-000000000001';
-    setSession({} as any);
-    setUser({ id: userId, email: userEmail } as any);
-    setProfile({
+    let userId = customUserId;
+    if (!userId) {
+      const emailLower = userEmail.toLowerCase();
+      if (emailLower.includes('zara')) userId = 'usr-c1-zara';
+      else if (emailLower.includes('ahmed')) userId = 'usr-c2-ahmed';
+      else if (emailLower.includes('sara')) userId = 'usr-c3-sara';
+      else if (emailLower.includes('abdul')) userId = 'usr-c4-abdul';
+      else {
+        userId = 'usr-c-' + Math.abs(emailLower.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16);
+      }
+    }
+
+    const userObj = { id: userId, email: userEmail } as any;
+    const profileObj = {
       id: userId,
       email: userEmail,
       display_name: userName,
-      role: 'consumer',
+      role: 'consumer' as const,
       is_active: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    } as any);
+    } as any;
+    const sessionObj = { access_token: 'consumer-bypass-token', user: userObj } as any;
+
+    setSession(sessionObj);
+    setUser(userObj);
+    setProfile(profileObj);
     setBrand(null);
     setIsGuest(false);
     setIsLoading(false);
+
+    AsyncStorage.setItem(
+      '@jumble_sale_active_auth',
+      JSON.stringify({ user: userObj, profile: profileObj, brand: null })
+    ).catch(() => {});
   };
 
   useEffect(() => {
@@ -407,13 +456,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (!mounted) return;
 
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
-
         if (currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
           setIsGuest(false);
           await fetchProfile(currentSession.user.id, currentSession.user);
           savePushToken(currentSession.user.id);
+        } else {
+          // Restore local session if active
+          try {
+            const rawAuth = await AsyncStorage.getItem('@jumble_sale_active_auth');
+            if (rawAuth) {
+              const parsed = JSON.parse(rawAuth);
+              if (parsed?.profile && parsed?.user) {
+                setSession({ access_token: 'local-active-session', user: parsed.user } as any);
+                setUser(parsed.user);
+                setProfile(parsed.profile);
+                setBrand(parsed.brand || null);
+                setIsGuest(false);
+              }
+            }
+          } catch (storageErr) {
+            console.warn('[AuthProvider] Local auth restoration note:', storageErr);
+          }
         }
       } catch (err) {
         console.error('[AuthProvider] Auth initialization failed:', err);
@@ -439,7 +504,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         await fetchProfile(currentSession.user.id, currentSession.user);
         savePushToken(currentSession.user.id);
       } else {
-
         setProfile(null);
         setBrand(null);
       }
@@ -451,11 +515,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       mounted = false;
       subscription.unsubscribe();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signOut = async () => {
     setIsLoading(true);
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    try {
+      await AsyncStorage.removeItem('@jumble_sale_active_auth');
+    } catch {}
     setSession(null);
     setUser(null);
     setProfile(null);

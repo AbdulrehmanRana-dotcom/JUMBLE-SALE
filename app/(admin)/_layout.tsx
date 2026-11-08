@@ -10,7 +10,6 @@ export default function AdminLayout() {
         contentStyle: { backgroundColor: colors.background },
       }}>
       <Stack.Screen name="index" />
-      <Stack.Screen name="reports" />
     </Stack>
   );
 }

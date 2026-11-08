@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
@@ -22,8 +23,8 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/Toast';
 import { saveBrandRegistrationLocally } from '@/lib/brandStore';
-import { uploadBrandVerificationDoc } from '@/lib/storage';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
 import { colors, radii, spacing, typography } from '@/theme';
 
 function generateUUID(): string {
@@ -103,6 +104,7 @@ type PickedDocument = {
 export default function RegisterScreen() {
   const router = useRouter();
   const toast = useToast();
+  const { bypassAsConsumer, bypassAsBrand } = useAuth();
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<PickedDocument | null>(null);
   const [docError, setDocError] = useState<string | null>(null);
@@ -245,6 +247,49 @@ export default function RegisterScreen() {
           ? `${window.location.origin}/(auth)/login`
           : 'jumblesale://login';
 
+      // Always persist credentials and identity locally so user can log in even in offline/demo mode
+      try {
+        await AsyncStorage.setItem(`@user_password_${emailClean}`, data.password.trim());
+        await AsyncStorage.setItem(`@user_role_${emailClean}`, data.role);
+        await AsyncStorage.setItem(
+          `@user_name_${emailClean}`,
+          data.role === 'brand' ? (data.brandName?.trim() || 'Brand Partner') : data.fullName.trim()
+        );
+      } catch (storageErr) {
+        console.warn('[Register] Local password cache notice:', storageErr);
+      }
+
+      // If consumer, also register in local shopper store for Admin visibility
+      if (data.role === 'consumer') {
+        try {
+          const newShopper = {
+            id: `usr-c-${Date.now()}`,
+            email: emailClean,
+            display_name: data.fullName.trim(),
+            full_name: data.fullName.trim(),
+            role: 'consumer' as const,
+            is_active: true,
+            avatar_url: null,
+            push_token: null,
+            created_at: new Date().toISOString(),
+            followed_brands_count: 0,
+            total_clicks: 0,
+            total_shares: 0,
+          };
+          const rawShoppers = await AsyncStorage.getItem('@jumble_sale_registered_shoppers');
+          let currentShoppers: any[] = [];
+          if (rawShoppers) {
+            try {
+              currentShoppers = JSON.parse(rawShoppers);
+            } catch {}
+          }
+          currentShoppers.push(newShopper);
+          await AsyncStorage.setItem('@jumble_sale_registered_shoppers', JSON.stringify(currentShoppers));
+        } catch (sErr) {
+          console.warn('[Register] Error saving local shopper:', sErr);
+        }
+      }
+
       // 3. Supabase Auth Sign Up
       let generatedUserId = generateUUID();
       let hasSession = false;
@@ -282,7 +327,7 @@ export default function RegisterScreen() {
             toast.show('This email is already registered! Please sign in or use another email.', 'error');
             setLoading(false);
             return;
-          } else {
+          } else if (isSupabaseConfigured) {
             toast.show(authError.message, 'error');
             setLoading(false);
             return;
@@ -299,7 +344,7 @@ export default function RegisterScreen() {
         console.warn('[Register] Auth call fallback:', authErr?.message);
       }
 
-      // 4. If Brand, GUARANTEE local storage save so Admin Portal instantly displays it in Queue!
+      // 4. Role-based routing and storage guarantee
       if (data.role === 'brand') {
         const brandUUID = generateUUID();
         const brandRecord = {
@@ -320,14 +365,14 @@ export default function RegisterScreen() {
           created_at: new Date().toISOString(),
         };
 
-        // Save locally first
+        // Save locally first so Admin Portal instantly displays it in Queue!
         await saveBrandRegistrationLocally(brandRecord);
 
         // Also attempt insert into Supabase brands table if valid UUID owner_id
         const isUUID = (val?: string) =>
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val || '');
 
-        if (isUUID(generatedUserId)) {
+        if (isUUID(generatedUserId) && isSupabaseConfigured) {
           try {
             await (supabase.from('brands') as any).insert(brandRecord);
           } catch (bInsertErr) {
@@ -337,6 +382,12 @@ export default function RegisterScreen() {
 
         toast.show('Brand Application Submitted! Pending admin approval.', 'success');
 
+        if (!isSupabaseConfigured) {
+          bypassAsBrand(emailClean, data.brandName!.trim());
+          router.replace('/(brand)/pending');
+          return;
+        }
+
         if (!hasSession) {
           setVerificationSentEmail(emailClean);
           setLoading(false);
@@ -345,14 +396,21 @@ export default function RegisterScreen() {
 
         router.replace('/(brand)/pending');
       } else {
+        // Consumer registration
+        toast.show('Account Created Successfully! Welcome to Jumble Sale.', 'success');
+
+        if (!isSupabaseConfigured) {
+          bypassAsConsumer(emailClean, data.fullName.trim(), generatedUserId);
+          router.replace('/(consumer)');
+          return;
+        }
+
         if (!hasSession) {
           setVerificationSentEmail(emailClean);
-          toast.show('Account Created Successfully! Please verify your email.', 'success');
           setLoading(false);
           return;
         }
 
-        toast.show('Account Created Successfully! Welcome to Jumble Sale.', 'success');
         router.replace('/(consumer)');
       }
     } catch (err: any) {

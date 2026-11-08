@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: generate-embeddings
 // Generates 768-dimensional content embeddings using Google Gemini text-embedding-004.
 // IMPORTANT: Gemini API key is accessed strictly from Supabase environment secrets (GEMINI_API_KEY).

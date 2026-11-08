@@ -13,6 +13,7 @@ class InteractionLogger {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private BATCH_INTERVAL_MS = 3000;
   private loggedViews = new Set<string>();
+  private loggedClicks = new Set<string>();
 
   public logInteraction(dealId: string, type: InteractionType, userId?: string | null) {
     // Deduplicate rapid view logs for the same deal in a single session
@@ -20,6 +21,13 @@ class InteractionLogger {
       const key = `${userId || 'anon'}_${dealId}`;
       if (this.loggedViews.has(key)) return;
       this.loggedViews.add(key);
+    }
+
+    // Deduplicate outbound click logs for the same deal in a single session
+    if (type === 'click') {
+      const key = `${userId || 'anon'}_${dealId}`;
+      if (this.loggedClicks.has(key)) return;
+      this.loggedClicks.add(key);
     }
 
     this.queue.push({

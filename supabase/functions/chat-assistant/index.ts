@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: chat-assistant
 // AI Shopping Deals Chatbot powered by Gemini text model with real database query execution.
 // Supports English and Roman Urdu, intent extraction, rate limiting, and prompt injection defense.

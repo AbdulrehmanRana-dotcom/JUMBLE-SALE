@@ -19,7 +19,8 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useToast } from '@/components/ui/Toast';
-import { supabase } from '@/lib/supabase';
+import { getLocalBrands, KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND } from '@/lib/brandStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { colors, radii, spacing, typography } from '@/theme';
 
@@ -84,10 +85,11 @@ export default function LoginScreen() {
 
   const onSubmit = async (data: LoginFormData) => {
     const emailClean = data.email.trim().toLowerCase();
+    const passClean = data.password.trim();
 
-    // 1. Admin Control Centre (exact credentials: admin / admin or admin@jumblesale.com)
+    // 1. Admin Control Centre
     if (emailClean === 'admin' || emailClean === 'admin@jumblesale.com' || emailClean === 'admin@jumblesale.pk') {
-      if (data.password.trim() === 'admin' || data.password.trim() === 'admin123') {
+      if (passClean === 'admin' || passClean === 'admin123') {
         toast.show('Welcome Back! Admin Login Successful', 'success');
         bypassAsAdmin();
         router.replace('/(admin)');
@@ -98,74 +100,167 @@ export default function LoginScreen() {
       }
     }
 
-    // 2. Shorthand keywords & Verified Brands
-    if (emailClean === 'brand' || emailClean === 'contact@khaadi.com') {
-      const storedPass =
-        (await AsyncStorage.getItem('@user_password_contact@khaadi.com')) ||
-        (await AsyncStorage.getItem('@user_password_yipiri1275@bitproy.com'));
-      const passValid =
-        data.password.trim() === 'brand' ||
-        data.password.trim() === 'khaadi123' ||
-        data.password.trim() === 'abcd 1234' ||
-        (storedPass && data.password.trim() === storedPass.trim());
+    // 2. Load Local & Stored User Identity / Role
+    const storedRole = await AsyncStorage.getItem(`@user_role_${emailClean}`);
+    const storedPass = await AsyncStorage.getItem(`@user_password_${emailClean}`);
+    const storedName = await AsyncStorage.getItem(`@user_name_${emailClean}`);
 
-      if (passValid) {
-        toast.show('Welcome Back! Khaadi Brand Login Successful', 'success');
-        bypassAsBrand('contact@khaadi.com', 'Khaadi');
-        router.replace('/(brand)');
+    // If stored role is explicitly admin
+    if (storedRole === 'admin') {
+      if (passClean === 'admin' || passClean === 'admin123' || (storedPass && passClean === storedPass.trim())) {
+        toast.show('Welcome Back! Admin Login Successful', 'success');
+        bypassAsAdmin();
+        router.replace('/(admin)');
         return;
       } else {
-        toast.show('Wrong Password for Brand! Please try again.', 'error');
+        toast.show('Wrong Password for Admin! Please enter the correct password.', 'error');
         return;
       }
     }
 
-    if (emailClean === 'info@outfitters.com.pk') {
-      if (data.password.trim() === 'outfitters123' || data.password.trim() === 'brand') {
-        toast.show('Welcome Back! Outfitters Login Successful', 'success');
-        bypassAsBrand('info@outfitters.com.pk', 'Outfitters');
-        router.replace('/(brand)');
-        return;
-      } else {
-        toast.show('Wrong Password for Outfitters!', 'error');
-        return;
-      }
+    // 3. Load Local & Pre-seeded Brands
+    let localBrands: any[] = [];
+    try {
+      localBrands = await getLocalBrands();
+    } catch {
+      localBrands = [KHAADI_BRAND, OUTFITTERS_BRAND, GUL_AHMED_BRAND];
     }
 
-    if (emailClean === 'customercare@gulahmed.com') {
-      if (data.password.trim() === 'gulahmed123' || data.password.trim() === 'brand') {
-        toast.show('Welcome Back! Gul Ahmed Ideas Login Successful', 'success');
-        bypassAsBrand('customercare@gulahmed.com', 'Gul Ahmed');
-        router.replace('/(brand)');
-        return;
-      } else {
-        toast.show('Wrong Password for Gul Ahmed!', 'error');
+    // Check if account matches a Brand
+    const matchedBrand = localBrands.find(
+      (b) =>
+        b.business_email?.toLowerCase() === emailClean ||
+        b.name?.toLowerCase() === emailClean ||
+        (emailClean === 'brand' && b.name.toLowerCase() === 'khaadi') ||
+        (emailClean === 'khaadi' && b.name.toLowerCase() === 'khaadi') ||
+        (emailClean === 'outfitters' && b.name.toLowerCase().includes('outfitter')) ||
+        (emailClean === 'gulahmed' && b.name.toLowerCase().includes('ahmed'))
+    );
+
+    const isBrandAccount = Boolean(
+      storedRole === 'brand' ||
+      matchedBrand ||
+      emailClean === 'brand' ||
+      emailClean === 'khaadi' ||
+      emailClean === 'outfitters' ||
+      emailClean === 'gulahmed' ||
+      emailClean === 'contact@khaadi.com' ||
+      emailClean === 'info@outfitters.com.pk' ||
+      emailClean === 'customercare@gulahmed.com' ||
+      emailClean === 'yipiri1275@bitproy.com'
+    );
+
+    // 4. Resilient Local Authentication (when Supabase live backend is not connected)
+    if (!isSupabaseConfigured) {
+      if (isBrandAccount) {
+        // === BRAND PORTAL ===
+        const storedBrandPass =
+          storedPass ||
+          (await AsyncStorage.getItem(`@user_password_${emailClean}`)) ||
+          (await AsyncStorage.getItem('@user_password_yipiri1275@bitproy.com')) ||
+          (await AsyncStorage.getItem('@user_password_brand_partner')) ||
+          (await AsyncStorage.getItem('@user_password_contact@khaadi.com'));
+
+        const isBrandPassValid =
+          passClean === 'abcd1234' ||
+          passClean === 'abcd 1234' ||
+          (storedBrandPass && passClean === storedBrandPass.trim());
+
+        if (!isBrandPassValid) {
+          toast.show('Wrong Password for Brand Portal! Please enter the correct password.', 'error');
+          return;
+        }
+
+        const targetBrand = matchedBrand || {
+          id: 'b-brand-' + Date.now(),
+          owner_id: 'owner-' + Date.now(),
+          name: storedName || 'Official Brand Partner',
+          business_email: emailClean,
+          contact_number: '+92 42 111 000 000',
+          category: 'Fashion & Apparel',
+          status: 'pending',
+          is_verified: false,
+          created_at: new Date().toISOString(),
+        };
+
+        const brandName =
+          targetBrand.name ||
+          (emailClean.includes('outfitter') ? 'Outfitters' : null) ||
+          (emailClean.includes('gulahmed') ? 'Gul Ahmed' : null) ||
+          (emailClean.includes('khaadi') ? 'Khaadi' : null) ||
+          'Brand Partner';
+
+        toast.show(`Welcome Back! ${brandName} Login Successful`, 'success');
+        bypassAsBrand(emailClean || targetBrand.business_email, brandName);
+
+        if (targetBrand.status === 'rejected') {
+          router.replace('/(brand)/rejected' as any);
+        } else if (targetBrand.status === 'active' && targetBrand.is_verified) {
+          router.replace('/(brand)');
+        } else {
+          router.replace('/(brand)/pending');
+        }
         return;
       }
-    }
 
-    if (emailClean === 'user' || emailClean === 'consumer' || emailClean === 'zara.khan@gmail.com') {
-      const storedPass =
+      // === CONSUMER / SHOPPER PORTAL ===
+      // Every account that is not Admin or Brand is a Consumer/Shopper!
+      const storedShopperPass =
+        storedPass ||
+        (await AsyncStorage.getItem(`@user_password_${emailClean}`)) ||
         (await AsyncStorage.getItem('@user_password_zara.khan@gmail.com')) ||
-        (await AsyncStorage.getItem('@user_password_lilolam582@deertees.com')) ||
         (await AsyncStorage.getItem('@user_password_consumer_user'));
-      const passValid =
-        data.password.trim() === 'user' ||
-        data.password.trim() === 'abcd 1234' ||
-        data.password.trim() === 'consumer' ||
-        (storedPass && data.password.trim() === storedPass.trim());
 
-      if (passValid) {
-        toast.show('Welcome Back! Shopper Login Successful', 'success');
-        bypassAsConsumer('zara.khan@gmail.com', 'Zara Khan');
-        router.replace('/(consumer)');
-        return;
-      } else {
-        toast.show('Wrong Password for Shopper User!', 'error');
+      const isShopperPassValid =
+        passClean === 'consumer' ||
+        passClean === 'abcd1234' ||
+        passClean === 'abcd 1234' ||
+        passClean === 'password' ||
+        passClean === '123456' ||
+        (storedShopperPass && passClean === storedShopperPass.trim());
+
+      if (!isShopperPassValid) {
+        toast.show('Wrong Password for Shopper Account! Please try again.', 'error');
         return;
       }
+
+      // Determine display name and user ID for this specific consumer
+      let displayName = storedName || '';
+      let userId: string | undefined = undefined;
+
+      if (emailClean === 'zara.khan@gmail.com' || emailClean.includes('zara')) {
+        displayName = displayName || 'Zara Khan';
+        userId = 'usr-c1-zara';
+      } else if (emailClean === 'ahmed.bilal@gmail.com' || emailClean.includes('ahmed.bilal')) {
+        displayName = displayName || 'Ahmed Bilal';
+        userId = 'usr-c2-ahmed';
+      } else if (emailClean === 'sara.tariq@gmail.com' || emailClean.includes('sara.tariq')) {
+        displayName = displayName || 'Sara Tariq';
+        userId = 'usr-c3-sara';
+      } else if (emailClean === 'abdulrehman@email.com' || emailClean.includes('abdulrehman')) {
+        displayName = displayName || 'Abdul Rehman';
+        userId = 'usr-c4-abdul';
+      } else if (emailClean === 'consumer' || emailClean === 'user' || emailClean === 'shopper') {
+        displayName = displayName || 'Shopper User';
+        userId = 'usr-c1-zara';
+      } else {
+        if (!displayName) {
+          const prefix = emailClean.split('@')[0];
+          displayName = prefix
+            .split(/[._-]/)
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+        }
+        userId = 'usr-c-' + Math.abs(emailClean.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16);
+      }
+
+      toast.show(`Welcome Back, ${displayName}!`, 'success');
+      bypassAsConsumer(emailClean, displayName, userId);
+      router.replace('/(consumer)');
+      return;
     }
 
+    // 4. Live Supabase Authentication (when valid credentials are provided in .env)
     setLoading(true);
     setUnconfirmedEmail(null);
     try {
@@ -192,7 +287,6 @@ export default function LoginScreen() {
       }
 
       if (authData?.user) {
-        // Query user's profile to find their role
         let role = 'consumer';
         try {
           const { data: prof } = await (supabase.from('profiles') as any)
@@ -231,7 +325,8 @@ export default function LoginScreen() {
         }
       }
     } catch (err: any) {
-      toast.show(err.message || 'Wrong Email or Password! Please check your credentials.', 'error');
+      console.warn('[Login] signInWithPassword notice:', err?.message);
+      toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
     } finally {
       setLoading(false);
     }
@@ -364,39 +459,54 @@ export default function LoginScreen() {
           </Pressable>
 
           {/* Quick Portal Switcher */}
-          <View style={styles.demoRow}>
-            <Pressable
-              style={styles.demoChip}
-              onPress={() => {
-                setValue('email', 'zara.khan@gmail.com');
-                setValue('password', 'consumer');
-                toast.show('Selected Shopper (zara.khan@gmail.com)', 'info');
-              }}>
-              <Ionicons name="cart" size={13} color={colors.primary} />
-              <Text style={styles.demoChipText}>Shopper</Text>
-            </Pressable>
+          <View style={{ gap: spacing[1], marginVertical: spacing[1] }}>
+            <View style={styles.demoRow}>
+              <Pressable
+                style={styles.demoChip}
+                onPress={() => {
+                  setValue('email', 'zara.khan@gmail.com', { shouldValidate: true, shouldDirty: true });
+                  setValue('password', 'consumer', { shouldValidate: true, shouldDirty: true });
+                  toast.show('Selected Shopper: Zara Khan (zara.khan@gmail.com)', 'info');
+                }}>
+                <Ionicons name="cart" size={13} color={colors.primary} />
+                <Text style={styles.demoChipText}>Zara (Shopper)</Text>
+              </Pressable>
 
-            <Pressable
-              style={styles.demoChip}
-              onPress={() => {
-                setValue('email', 'contact@khaadi.com');
-                setValue('password', 'khaadi123');
-                toast.show('Selected Khaadi Brand (contact@khaadi.com)', 'info');
-              }}>
-              <Ionicons name="business" size={13} color={colors.primary} />
-              <Text style={styles.demoChipText}>Brand</Text>
-            </Pressable>
+              <Pressable
+                style={styles.demoChip}
+                onPress={() => {
+                  setValue('email', 'ahmed.bilal@gmail.com', { shouldValidate: true, shouldDirty: true });
+                  setValue('password', 'consumer', { shouldValidate: true, shouldDirty: true });
+                  toast.show('Selected Shopper: Ahmed Bilal (ahmed.bilal@gmail.com)', 'info');
+                }}>
+                <Ionicons name="person" size={13} color={colors.primary} />
+                <Text style={styles.demoChipText}>Ahmed (Shopper)</Text>
+              </Pressable>
+            </View>
 
-            <Pressable
-              style={styles.demoChip}
-              onPress={() => {
-                setValue('email', 'admin@jumblesale.com');
-                setValue('password', 'admin');
-                toast.show('Selected Master Admin (admin@jumblesale.com)', 'info');
-              }}>
-              <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
-              <Text style={styles.demoChipText}>Admin</Text>
-            </Pressable>
+            <View style={styles.demoRow}>
+              <Pressable
+                style={styles.demoChip}
+                onPress={() => {
+                  setValue('email', 'contact@khaadi.com', { shouldValidate: true, shouldDirty: true });
+                  setValue('password', 'abcd1234', { shouldValidate: true, shouldDirty: true });
+                  toast.show('Selected Brand: Khaadi (contact@khaadi.com)', 'info');
+                }}>
+                <Ionicons name="business" size={13} color={colors.primary} />
+                <Text style={styles.demoChipText}>Khaadi (Brand)</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.demoChip}
+                onPress={() => {
+                  setValue('email', 'admin@jumblesale.com', { shouldValidate: true, shouldDirty: true });
+                  setValue('password', 'admin', { shouldValidate: true, shouldDirty: true });
+                  toast.show('Selected Master Admin (admin@jumblesale.com)', 'info');
+                }}>
+                <Ionicons name="shield-checkmark" size={13} color={colors.primary} />
+                <Text style={styles.demoChipText}>Admin Portal</Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* Primary Action Button */}

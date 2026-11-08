@@ -20,6 +20,8 @@ import {
 } from 'react-native';
 
 import { BrandAnalyticsDashboard } from '@/components/brand/BrandAnalyticsDashboard';
+import { DealLiveTimer } from '@/components/brand/DealLiveTimer';
+import { PostInsightsDrawer } from '@/components/brand/PostInsightsDrawer';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -28,8 +30,16 @@ import {
   getSavedBrandIdentity,
   saveBrandIdentityGlobally,
 } from '@/lib/brandStore';
-import { getLocalBrandDeals } from '@/lib/dealStore';
-import { supabase } from '@/lib/supabase';
+import {
+  duplicateDeal,
+  extendDealExpiry,
+  getDealRemainingDays,
+  getLocalBrandDeals,
+  isDealExpired,
+  toggleDealPause,
+  toggleDealPin,
+} from '@/lib/dealStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import { radii, spacing, typography } from '@/theme';
 import type { Brand, Deal } from '@/types/database.types';
@@ -119,20 +129,24 @@ export default function BrandProfileScreen() {
 
   const activeBrandId = brand?.id || authBrand?.id;
 
-  // 2. Fetch Real Brand Deals
+  // 2. Fetch Real Brand Deals (non-blocking with fast 800ms race timeout)
   const { data: deals = [], isLoading: dealsLoading, refetch: refetchDeals } = useQuery<Deal[]>({
     queryKey: ['brand-profile-deals', activeBrandId],
     queryFn: async () => {
       const localDeals = await getLocalBrandDeals(activeBrandId);
+      if (!activeBrandId || !isSupabaseConfigured) return localDeals;
       try {
-        if (!activeBrandId) return localDeals;
-        const { data, error } = await supabase
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 800)
+        );
+        const queryPromise = supabase
           .from('deals')
           .select('*')
           .eq('brand_id', activeBrandId)
           .order('created_at', { ascending: false });
-        if (error || !data || data.length === 0) return localDeals;
-        const serverDeals = (data as Deal[]) ?? [];
+        const res: any = await Promise.race([queryPromise, timeoutPromise]);
+        if (!res?.data || !Array.isArray(res.data) || res.data.length === 0) return localDeals;
+        const serverDeals = (res.data as Deal[]) ?? [];
         const merged = [...localDeals];
         for (const sd of serverDeals) {
           if (!merged.some((m) => m.id === sd.id)) {
@@ -144,21 +158,116 @@ export default function BrandProfileScreen() {
         return localDeals;
       }
     },
+    staleTime: 60 * 1000,
   });
 
-  // 3. Fetch Real Follower Count
+  // Real Post Management & Insights Drawer State
+  const [insightsDeal, setInsightsDeal] = useState<Deal | null>(null);
+  const [postsFilterTab, setPostsFilterTab] = useState<'all' | 'active' | 'paused' | 'expired'>('all');
+
+  const handleTogglePin = async (deal: Deal) => {
+    try {
+      const isPinned = await toggleDealPin(deal.id);
+      toast.show(
+        isPinned ? `📌 "${deal.title}" pinned to top!` : `Unpinned "${deal.title}"`,
+        'success'
+      );
+      refetchDeals();
+      queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+    } catch {
+      toast.show('Failed to update pin status', 'error');
+    }
+  };
+
+  const handleTogglePause = async (deal: Deal) => {
+    try {
+      const newStatus = await toggleDealPause(deal.id);
+      const isNowPaused = newStatus === 'paused';
+      toast.show(
+        isNowPaused
+          ? `⏸️ Promotion paused (Marked Out of Stock)`
+          : `▶️ Promotion resumed and live!`,
+        isNowPaused ? 'info' : 'success'
+      );
+      refetchDeals();
+      queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      if (insightsDeal && insightsDeal.id === deal.id) {
+        setInsightsDeal((prev) => (prev ? { ...prev, status: newStatus } : null));
+      }
+    } catch {
+      toast.show('Failed to update deal status', 'error');
+    }
+  };
+
+  const handleQuickExtend = async (dealId: string, days: number) => {
+    try {
+      const updated = await extendDealExpiry(dealId, days);
+      if (updated) {
+        toast.show(`⏳ Deal extended by ${days} days and reactivated!`, 'success');
+        refetchDeals();
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+        if (insightsDeal && insightsDeal.id === dealId) {
+          setInsightsDeal(updated);
+        }
+      }
+    } catch {
+      toast.show('Failed to extend deal', 'error');
+    }
+  };
+
+  const handleDuplicate = async (dealId: string) => {
+    try {
+      const cloned = await duplicateDeal(dealId);
+      if (cloned) {
+        toast.show('📋 Promotion duplicated successfully!', 'success');
+        refetchDeals();
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      }
+    } catch {
+      toast.show('Failed to clone promotion', 'error');
+    }
+  };
+
+  const activeCount = deals.filter((d) => d.status === 'active' && !isDealExpired(d)).length;
+  const pausedCount = deals.filter((d) => d.status === 'paused').length;
+  const expiredCount = deals.filter((d) => isDealExpired(d) || d.status === 'expired').length;
+
+  const displayManagePosts = [...deals].filter((d) => {
+    if (postsFilterTab === 'active') return d.status === 'active' && !isDealExpired(d);
+    if (postsFilterTab === 'paused') return d.status === 'paused';
+    if (postsFilterTab === 'expired') return isDealExpired(d) || d.status === 'expired';
+    return true;
+  }).sort((a, b) => {
+    if (Boolean(b.is_pinned) !== Boolean(a.is_pinned)) {
+      return (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0);
+    }
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+
+  // 3. Fetch Real Follower Count (non-blocking with fast 800ms race timeout)
   const { data: followerCount = 0 } = useQuery<number>({
     queryKey: ['brand-follower-count', activeBrandId],
     queryFn: async () => {
-      if (!activeBrandId) return 0;
-      const { count, error } = await supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('brand_id', activeBrandId);
-      if (error || count === null) return 0;
-      return count;
+      if (!activeBrandId || !isSupabaseConfigured) return 0;
+      try {
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 800));
+        const query = supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('brand_id', activeBrandId);
+        const res: any = await Promise.race([query, timeout]);
+        if (typeof res?.count === 'number') return res.count;
+        return 0;
+      } catch {
+        return 0;
+      }
     },
     enabled: Boolean(activeBrandId),
+    staleTime: 60 * 1000,
   });
 
   const activeBrand = brand || authBrand;
@@ -753,7 +862,50 @@ export default function BrandProfileScreen() {
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.subHeaderTitle}>Manage Posts</Text>
-          <View style={{ width: 30 }} />
+          <Pressable
+            style={styles.openFullFeedBtn}
+            onPress={() => router.push('/(brand)/posts')}>
+            <Text style={styles.openFullFeedText}>Feed View</Text>
+            <Ionicons name="arrow-forward" size={14} color="#00FF66" />
+          </Pressable>
+        </View>
+
+        {/* Filter Tabs Row */}
+        <View style={styles.manageFilterTabsRow}>
+          <Pressable
+            style={[styles.manageFilterTab, postsFilterTab === 'all' && styles.manageFilterTabActive]}
+            onPress={() => setPostsFilterTab('all')}>
+            <Text style={[styles.manageFilterTabText, postsFilterTab === 'all' && styles.manageFilterTabTextActive]}>
+              All ({deals.length})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.manageFilterTab, postsFilterTab === 'active' && styles.manageFilterTabActive]}
+            onPress={() => setPostsFilterTab('active')}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#00FF66', marginRight: 4 }} />
+            <Text style={[styles.manageFilterTabText, postsFilterTab === 'active' && styles.manageFilterTabTextActive]}>
+              Active ({activeCount})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.manageFilterTab, postsFilterTab === 'paused' && styles.manageFilterTabActive]}
+            onPress={() => setPostsFilterTab('paused')}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#F59E0B', marginRight: 4 }} />
+            <Text style={[styles.manageFilterTabText, postsFilterTab === 'paused' && styles.manageFilterTabTextActive]}>
+              Paused ({pausedCount})
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.manageFilterTab, postsFilterTab === 'expired' && styles.manageFilterTabActive]}
+            onPress={() => setPostsFilterTab('expired')}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444', marginRight: 4 }} />
+            <Text style={[styles.manageFilterTabText, postsFilterTab === 'expired' && styles.manageFilterTabTextActive]}>
+              Expired ({expiredCount})
+            </Text>
+          </Pressable>
         </View>
 
         {dealsLoading ? (
@@ -762,7 +914,7 @@ export default function BrandProfileScreen() {
           </View>
         ) : (
           <FlatList
-            data={deals}
+            data={displayManagePosts}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
@@ -773,53 +925,175 @@ export default function BrandProfileScreen() {
                 tintColor="#00FF66"
               />
             }
-            renderItem={({ item, index }) => (
-              <View style={styles.managePostItem}>
-                <View style={styles.managePostHeader}>
-                  <View style={styles.managePostThumb}>
-                    {item.image_urls?.[0] ? (
-                      <Image source={{ uri: item.image_urls[0] }} style={styles.thumbImg} />
-                    ) : (
-                      <Ionicons name="image-outline" size={20} color="#64748B" />
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.managePostTitle}>{item.title}</Text>
-                    <Text style={styles.managePostMeta}>
-                      ID: p{index + 1} • Oct 14, 2026
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      item.status === 'active'
-                        ? styles.statusPillLive
-                        : styles.statusPillPending,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.statusPillText,
-                        item.status === 'active'
-                          ? { color: '#00FF66' }
-                          : { color: '#F59E0B' },
-                      ]}>
-                      {item.status === 'active' ? 'Live' : 'Pending Review'}
-                    </Text>
-                  </View>
-                </View>
+            ListEmptyComponent={
+              <EmptyState
+                title="No Promotions Found"
+                description="Tap Feed View to create a new promotion or clear the selected tab filter."
+                icon="documents-outline"
+              />
+            }
+            renderItem={({ item }) => {
+              const isEnded = isDealExpired(item);
+              const isPaused = item.status === 'paused';
+              const createdDateStr = item.created_at
+                ? new Date(item.created_at).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                : 'Recently';
 
-                <View style={styles.managePostMetricBar}>
-                  <Ionicons name="stats-chart" size={14} color="#00FF66" />
-                  <Text style={styles.managePostMetricText}>
-                    {item.status === 'active'
-                      ? `Active • ${item.deal_type === 'online' ? 'Online Offer' : 'In-Store Offer'}`
-                      : `${item.status.toUpperCase()} • Promotion`}
-                  </Text>
+              return (
+                <View style={[styles.managePostItem, item.is_pinned && styles.managePostItemPinned]}>
+                  {/* Top Pinned Ribbon if Pinned */}
+                  {Boolean(item.is_pinned) && (
+                    <View style={styles.managePinnedRibbon}>
+                      <Ionicons name="pin" size={11} color="#090A0E" />
+                      <Text style={styles.managePinnedRibbonText}>PINNED TO TOP</Text>
+                    </View>
+                  )}
+
+                  {/* Header Row */}
+                  <View style={styles.managePostHeader}>
+                    <View style={styles.managePostThumb}>
+                      {item.image_urls?.[0] || item.banner_url ? (
+                        <Image source={{ uri: item.image_urls?.[0] || item.banner_url || '' }} style={styles.thumbImg} />
+                      ) : (
+                        <Ionicons name="image-outline" size={20} color="#64748B" />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.managePostTitle} numberOfLines={2}>{item.title}</Text>
+                      <Text style={styles.managePostMeta}>
+                        {createdDateStr} • {item.discount_pct}% OFF {item.promo_code ? `• Code: ${item.promo_code}` : ''}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        isEnded
+                          ? styles.statusPillEnded
+                          : isPaused
+                          ? styles.statusPillPaused
+                          : styles.statusPillLive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          isEnded
+                            ? { color: '#EF4444' }
+                            : isPaused
+                            ? { color: '#F59E0B' }
+                            : { color: '#00FF66' },
+                        ]}>
+                        {isEnded ? 'Expired' : isPaused ? 'Paused' : 'Live'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Real Live Urgency Timer Widget */}
+                  <View style={styles.manageTimerRow}>
+                    <DealLiveTimer
+                      dealId={item.id}
+                      endDate={item.end_date}
+                      status={item.status}
+                      onExpire={() => refetchDeals()}
+                    />
+                    <Text style={styles.managePostCityText}>
+                      📍 {item.city || 'All Pakistan'} • {item.deal_type === 'online' ? 'Online' : 'In-Store'}
+                    </Text>
+                  </View>
+
+                  {/* 6 Quick Action Control Chips */}
+                  <View style={styles.managePostActionChipsRow}>
+                    {/* Pin / Unpin */}
+                    <Pressable
+                      style={[styles.manageActionChip, item.is_pinned && styles.manageActionChipPinned]}
+                      hitSlop={4}
+                      onPress={() => handleTogglePin(item)}>
+                      <Ionicons
+                        name={item.is_pinned ? 'pin' : 'pin-outline'}
+                        size={12}
+                        color={item.is_pinned ? '#090A0E' : '#94A3B8'}
+                      />
+                      <Text style={[styles.manageActionChipText, item.is_pinned && styles.manageActionChipTextPinned]}>
+                        {item.is_pinned ? 'Pinned' : 'Pin'}
+                      </Text>
+                    </Pressable>
+
+                    {/* Pause / Resume */}
+                    <Pressable
+                      style={[styles.manageActionChip, isPaused && styles.manageActionChipPaused]}
+                      hitSlop={4}
+                      onPress={() => handleTogglePause(item)}>
+                      <Ionicons
+                        name={isPaused ? 'play-outline' : 'pause-outline'}
+                        size={12}
+                        color={isPaused ? '#00FF66' : '#F59E0B'}
+                      />
+                      <Text
+                        style={[
+                          styles.manageActionChipText,
+                          { color: isPaused ? '#00FF66' : '#F59E0B' },
+                        ]}>
+                        {isPaused ? 'Resume' : 'Pause'}
+                      </Text>
+                    </Pressable>
+
+                    {/* +3 Days */}
+                    <Pressable
+                      style={styles.manageActionChip}
+                      hitSlop={4}
+                      onPress={() => handleQuickExtend(item.id, 3)}>
+                      <Ionicons name="add-circle-outline" size={12} color="#38BDF8" />
+                      <Text style={[styles.manageActionChipText, { color: '#38BDF8' }]}>+3d</Text>
+                    </Pressable>
+
+                    {/* +7 Days */}
+                    <Pressable
+                      style={styles.manageActionChip}
+                      hitSlop={4}
+                      onPress={() => handleQuickExtend(item.id, 7)}>
+                      <Ionicons name="calendar-outline" size={12} color="#38BDF8" />
+                      <Text style={[styles.manageActionChipText, { color: '#38BDF8' }]}>+7d</Text>
+                    </Pressable>
+
+                    {/* Clone */}
+                    <Pressable
+                      style={styles.manageActionChip}
+                      hitSlop={4}
+                      onPress={() => handleDuplicate(item.id)}>
+                      <Ionicons name="copy-outline" size={12} color="#A78BFA" />
+                      <Text style={[styles.manageActionChipText, { color: '#A78BFA' }]}>Clone</Text>
+                    </Pressable>
+
+                    {/* Insights */}
+                    <Pressable
+                      style={[styles.manageActionChip, styles.manageInsightsChip]}
+                      hitSlop={4}
+                      onPress={() => setInsightsDeal(item)}>
+                      <Ionicons name="bar-chart-outline" size={12} color="#00FF66" />
+                      <Text style={[styles.manageActionChipText, { color: '#00FF66' }]}>Insights</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            }}
           />
         )}
+
+        {/* Real Post Insights Drawer */}
+        <PostInsightsDrawer
+          deal={insightsDeal}
+          visible={Boolean(insightsDeal)}
+          onClose={() => setInsightsDeal(null)}
+          onExtend={handleQuickExtend}
+          onTogglePause={(id) => {
+            const d = deals.find((deal) => deal.id === id);
+            if (d) handleTogglePause(d);
+          }}
+          onDuplicate={handleDuplicate}
+        />
       </SafeAreaView>
     );
   }
@@ -1416,6 +1690,133 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 1,
   },
+  openFullFeedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#12251A',
+    borderWidth: 1,
+    borderColor: '#00FF66',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+  },
+  openFullFeedText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#00FF66',
+  },
+  manageFilterTabsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    backgroundColor: '#090A0E',
+  },
+  manageFilterTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.full,
+    backgroundColor: '#141721',
+    borderWidth: 1,
+    borderColor: '#202432',
+  },
+  manageFilterTabActive: {
+    backgroundColor: '#12251A',
+    borderColor: '#00FF66',
+  },
+  manageFilterTabText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  manageFilterTabTextActive: {
+    color: '#00FF66',
+    fontWeight: '800',
+  },
+  managePostItemPinned: {
+    borderColor: '#00FF66',
+    backgroundColor: '#0E1719',
+  },
+  managePinnedRibbon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  managePinnedRibbonText: {
+    ...typography.caption,
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#090A0E',
+    letterSpacing: 0.5,
+  },
+  manageTimerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#1C202E',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1C202E',
+  },
+  managePostCityText: {
+    ...typography.caption,
+    fontSize: 11,
+    color: '#64748B',
+  },
+  managePostActionChipsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+  },
+  manageActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0F121C',
+    borderWidth: 1,
+    borderColor: '#202432',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+  },
+  manageActionChipPinned: {
+    backgroundColor: '#00FF66',
+    borderColor: '#00FF66',
+  },
+  manageActionChipPaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: '#F59E0B',
+  },
+  manageActionChipText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  manageActionChipTextPinned: {
+    color: '#090A0E',
+    fontWeight: '900',
+  },
+  manageInsightsChip: {
+    backgroundColor: 'rgba(0, 255, 102, 0.08)',
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    marginLeft: 'auto',
+  },
   statusPill: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1425,6 +1826,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#12251A',
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.3)',
+  },
+  statusPillPaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  statusPillEnded: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   statusPillPending: {
     backgroundColor: 'rgba(245, 158, 11, 0.15)',

@@ -6,6 +6,7 @@ import {
 import { getLocalBrandDeals, saveLocalDeal } from '@/lib/dealStore';
 import { createNotification } from '@/lib/notificationStore';
 import { supabase } from '@/lib/supabase';
+import { fetchRegisteredShoppersList } from '@/lib/adminAnalytics';
 
 /**
  * Admin Service Layer
@@ -53,9 +54,10 @@ export async function fetchAdminStats(): Promise<{
       const localDeals = await getLocalBrandDeals();
       const localPendingDeals = localDeals.filter((d) => d.status === 'pending');
       const localActiveDeals = localDeals.filter((d) => d.status === 'active');
+      const localShoppers = await fetchRegisteredShoppersList();
 
       return {
-        totalUsers: Number(stats.total_users ?? 0),
+        totalUsers: Math.max(Number(stats.total_users ?? 0), localShoppers.length),
         totalBrands: Math.max(Number(stats.total_brands ?? 0), localBrands.length),
         pendingBrands: Math.max(Number(stats.pending_brands ?? 0), localPendingBrands.length),
         totalDeals: Math.max(Number(stats.total_deals ?? 0), localDeals.length),
@@ -93,9 +95,10 @@ export async function fetchAdminStats(): Promise<{
     const localDeals = await getLocalBrandDeals();
     const localPendingDeals = localDeals.filter((d) => d.status === 'pending');
     const localActiveDeals = localDeals.filter((d) => d.status === 'active');
+    const localShoppers = await fetchRegisteredShoppersList();
 
     return {
-      totalUsers: usersRes.count ?? 0,
+      totalUsers: Math.max(usersRes.count ?? 0, localShoppers.length),
       totalBrands: Math.max(brandsRes.count ?? 0, localBrands.length),
       pendingBrands: Math.max(pendingBrandsRes.count ?? 0, localPendingBrands.length),
       totalDeals: Math.max(dealsRes.count ?? 0, localDeals.length),
@@ -107,8 +110,9 @@ export async function fetchAdminStats(): Promise<{
     console.warn('[Admin] SQL Count error fallback to local stores:', err);
     const localBrands = await getLocalBrands();
     const localDeals = await getLocalBrandDeals();
+    const localShoppers = await fetchRegisteredShoppersList();
     return {
-      totalUsers: 0,
+      totalUsers: localShoppers.length,
       totalBrands: localBrands.length,
       pendingBrands: localBrands.filter((b) => b.status === 'pending').length,
       totalDeals: localDeals.length,

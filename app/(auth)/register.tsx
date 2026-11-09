@@ -397,6 +397,21 @@ export default function RegisterScreen() {
         router.replace('/(brand)/pending');
       } else {
         // Consumer registration
+        if (isSupabaseConfigured) {
+          try {
+            await (supabase.from('profiles') as any).upsert({
+              id: generatedUserId,
+              email: emailClean,
+              display_name: data.fullName.trim(),
+              role: 'consumer',
+              is_active: true,
+              created_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
+          } catch (pErr) {
+            console.warn('[Register] Consumer profile sync notice:', pErr);
+          }
+        }
+
         toast.show('Account Created Successfully! Welcome to Jumble Sale.', 'success');
 
         if (!isSupabaseConfigured) {

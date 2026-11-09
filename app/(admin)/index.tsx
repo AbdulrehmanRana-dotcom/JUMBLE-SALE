@@ -638,13 +638,22 @@ export default function AdminDashboardScreen() {
       },
       {
         id: 'act-brands-dir',
-        title: 'Brands Directory',
+        title: 'Registered Brands Directory',
         subtitle: `Manage ${registeredBrands.length} registered brand partners`,
         category: 'action',
         icon: 'business-outline',
         iconColor: adminTheme.neon,
         iconBg: adminTheme.neonLight,
-        keywords: ['brands', 'brand directory', 'registered brands', 'partners', 'sellers', 'stores'],
+        keywords: [
+          'registered brands',
+          'register brand',
+          'registered',
+          'brands',
+          'brand directory',
+          'partners',
+          'sellers',
+          'stores',
+        ],
         onPress: () => {
           handleTabResetOrSwitch('brands');
           setSearchQuery('');
@@ -652,13 +661,23 @@ export default function AdminDashboardScreen() {
       },
       {
         id: 'act-shoppers-dir',
-        title: 'Shoppers Directory',
+        title: 'Registered Shoppers Directory',
         subtitle: `Manage ${registeredShoppers.length} consumer shopper accounts`,
         category: 'action',
         icon: 'people-outline',
         iconColor: '#10B981',
         iconBg: 'rgba(16, 185, 129, 0.15)',
-        keywords: ['users', 'shoppers', 'customers', 'consumers', 'user directory', 'accounts'],
+        keywords: [
+          'registered shoppers',
+          'registered users',
+          'registered',
+          'shoppers',
+          'users',
+          'customers',
+          'consumers',
+          'user directory',
+          'accounts',
+        ],
         onPress: () => {
           handleTabResetOrSwitch('users');
           setSearchQuery('');
@@ -820,46 +839,126 @@ export default function AdminDashboardScreen() {
       },
     ];
 
-    const matchedActions = allActions.filter((act) => {
-      if (act.title.toLowerCase().includes(q)) return true;
-      if (act.subtitle.toLowerCase().includes(q)) return true;
-      return act.keywords.some((k) => k.includes(q) || q.includes(k));
-    });
+    // Helper relevance scoring function (Exact > Starts-with > Word starts-with > Keyword)
+    const getRelevanceScore = (title: string, subtitle: string, keywords: string[]): number => {
+      const t = title.toLowerCase();
+      const sub = subtitle.toLowerCase();
 
-    // 2. Matching Brands
-    const matchedBrands = registeredBrands.filter((b) => {
-      const name = b.name.toLowerCase();
-      const email = (b.business_email || '').toLowerCase();
-      const cat = (b.category || '').toLowerCase();
-      return name.includes(q) || email.includes(q) || cat.includes(q);
-    }).slice(0, 5);
+      // 1. Exact match on title
+      if (t === q) return 1000;
 
-    // 3. Matching Deals
-    const matchedDeals = allDealsForAdmin.filter((d) => {
-      const title = (d.title || '').toLowerCase();
-      const desc = (d.description || '').toLowerCase();
-      const cat = (d.category?.name || '').toLowerCase();
-      const brandName = (d.brand?.name || '').toLowerCase();
-      return title.includes(q) || desc.includes(q) || cat.includes(q) || brandName.includes(q);
-    }).slice(0, 5);
+      // 2. Title starts with query (e.g. "Registered Brands" starts with "r" or "reg")
+      if (t.startsWith(q)) return 850;
 
-    // 4. Matching Users / Shoppers
-    const matchedUsers = registeredShoppers.filter((u) => {
-      const name = (u.display_name || '').toLowerCase();
-      const email = (u.email || '').toLowerCase();
-      return name.includes(q) || email.includes(q);
-    }).slice(0, 5);
+      // 3. Any word in the title starts with query
+      const titleWords = t.split(/[\s&•\-_/]+/);
+      if (titleWords.some((w) => w.startsWith(q))) return 700;
+
+      // 4. Any keyword starts with query
+      if (keywords.some((k) => k.toLowerCase().startsWith(q))) return 550;
+
+      // 5. Any word in any keyword starts with query
+      if (
+        keywords.some((k) =>
+          k
+            .toLowerCase()
+            .split(/[\s&•\-_/]+/)
+            .some((w) => w.startsWith(q))
+        )
+      ) {
+        return 450;
+      }
+
+      // If single letter query (e.g. "R"): DO NOT match random substrings in the middle of words!
+      if (q.length === 1) return 0;
+
+      // 6. Title contains query as substring
+      if (t.includes(q)) return 250;
+
+      // 7. Keyword contains query as substring
+      if (keywords.some((k) => k.toLowerCase().includes(q))) return 150;
+
+      // 8. Subtitle contains query as substring
+      if (sub.includes(q)) return 50;
+
+      return 0;
+    };
+
+    const scoredActions = allActions
+      .map((act) => ({
+        item: act,
+        score: getRelevanceScore(act.title, act.subtitle, act.keywords),
+      }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.item);
+
+    // 2. Matching Brands with scoring
+    const scoredBrands = registeredBrands
+      .map((b) => {
+        const name = b.name.toLowerCase();
+        const cat = (b.category || '').toLowerCase();
+        let score = 0;
+        if (name === q) score = 1000;
+        else if (name.startsWith(q)) score = 850;
+        else if (name.split(/[\s&•\-_/]+/).some((w) => w.startsWith(q))) score = 700;
+        else if (cat.startsWith(q)) score = 400;
+        else if (q.length > 1 && name.includes(q)) score = 250;
+        else if (q.length > 1 && cat.includes(q)) score = 100;
+        return { item: b, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((x) => x.item);
+
+    // 3. Matching Deals with scoring
+    const scoredDeals = allDealsForAdmin
+      .map((d) => {
+        const title = (d.title || '').toLowerCase();
+        const brandName = (d.brand?.name || '').toLowerCase();
+        let score = 0;
+        if (title.startsWith(q)) score = 800;
+        else if (brandName.startsWith(q)) score = 750;
+        else if (title.split(/[\s&•\-_/]+/).some((w) => w.startsWith(q))) score = 600;
+        else if (q.length > 1 && title.includes(q)) score = 200;
+        else if (q.length > 1 && brandName.includes(q)) score = 150;
+        return { item: d, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((x) => x.item);
+
+    // 4. Matching Users / Shoppers with scoring
+    const scoredUsers = registeredShoppers
+      .map((u) => {
+        const name = (u.display_name || u.full_name || '').toLowerCase();
+        const email = (u.email || '').toLowerCase();
+        let score = 0;
+        if (name === q) score = 1000;
+        else if (name.startsWith(q)) score = 800;
+        else if (name.split(/[\s&•\-_/]+/).some((w) => w.startsWith(q))) score = 600;
+        else if (email.startsWith(q)) score = 500;
+        else if (q.length > 1 && name.includes(q)) score = 200;
+        else if (q.length > 1 && email.includes(q)) score = 150;
+        return { item: u, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((x) => x.item);
 
     const totalCount =
-      matchedActions.length + matchedBrands.length + matchedDeals.length + matchedUsers.length;
+      scoredActions.length + scoredBrands.length + scoredDeals.length + scoredUsers.length;
 
     return {
       query: q,
       totalCount,
-      actions: matchedActions,
-      brands: matchedBrands,
-      deals: matchedDeals,
-      users: matchedUsers,
+      actions: scoredActions,
+      brands: scoredBrands,
+      deals: scoredDeals,
+      users: scoredUsers,
     };
   }, [searchQuery, registeredBrands, allDealsForAdmin, registeredShoppers, stats, signOut]);
 
@@ -1335,21 +1434,21 @@ export default function AdminDashboardScreen() {
         <MetricCard
           icon="people"
           label="Shoppers / Users"
-          value={stats?.totalUsers ?? 0}
+          value={Math.max(stats?.totalUsers ?? 0, registeredShoppers.length)}
           accentColor={adminTheme.neon}
           onPress={() => {
-            setActiveTab('management');
-            setManagementSubTab('users');
+            setDirectorySubTab('users');
+            setActiveTab('directory');
           }}
         />
         <MetricCard
           icon="business"
           label="Registered Brands"
-          value={stats?.totalBrands ?? 0}
+          value={Math.max(stats?.totalBrands ?? 0, registeredBrands.length)}
           accentColor="#00E5FF"
           onPress={() => {
-            setActiveTab('management');
-            setManagementSubTab('brands');
+            setDirectorySubTab('brands');
+            setActiveTab('directory');
           }}
         />
         <MetricCard
@@ -1358,13 +1457,14 @@ export default function AdminDashboardScreen() {
           value={stats?.pendingBrands ?? 0}
           accentColor={adminTheme.warning}
           urgent={Boolean(stats && stats.pendingBrands > 0)}
-          onPress={() => setActiveTab('brands_queue')}
+          onPress={() => handleTabResetOrSwitch('brands_queue')}
         />
         <MetricCard
           icon="pricetag"
           label="Total Promotions"
-          value={stats?.totalDeals ?? 0}
+          value={Math.max(stats?.totalDeals ?? 0, allDealsForAdmin.length)}
           accentColor="#A78BFA"
+          onPress={() => handleTabResetOrSwitch('growth_tools')}
         />
         <MetricCard
           icon="checkmark-circle"

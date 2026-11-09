@@ -18,11 +18,12 @@ if (typeof WebSocket === 'undefined' && typeof window === 'undefined') {
 
 export const isSupabaseConfigured = Boolean(
   rawUrl &&
-  !rawUrl.includes('ajbxviddoiipcxtovxxu') &&
   !rawUrl.includes('placeholder') &&
+  !rawUrl.includes('your-project') &&
   rawKey &&
   !rawKey.includes('dummy') &&
-  !rawKey.includes('your_supabase')
+  !rawKey.includes('your_supabase') &&
+  rawKey !== fallbackKey
 );
 
 if (!isSupabaseConfigured) {

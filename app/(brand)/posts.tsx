@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -99,8 +99,9 @@ export default function BrandPostsScreen() {
 
   // Speed Dial FAB State
   const [speedDialOpen, setSpeedDialOpen] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
 
-  // Instagram-style: Tapping Posts in bottom nav resets back to initial view
+  // Instagram-style: Tapping Posts in bottom nav resets back to initial view & scrolls to top
   useEffect(() => {
     const unsubscribe = onBrandPostsTabReset(() => {
       setCreateModalOpen(false);
@@ -111,6 +112,7 @@ export default function BrandPostsScreen() {
       setSpeedDialOpen(false);
       setAiModalOpen(false);
       setPostFilterTab('all');
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
     return unsubscribe;
   }, []);
@@ -1056,6 +1058,7 @@ export default function BrandPostsScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={displayPosts}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

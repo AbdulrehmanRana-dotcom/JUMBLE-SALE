@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -57,13 +57,15 @@ export default function BrandDashboardScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
 
-  // Instagram-style: Tapping Home in bottom nav resets search & category filters
+  // Instagram-style: Tapping Home in bottom nav resets search & category filters and scrolls to top
   useEffect(() => {
     const unsubscribe = onBrandHomeTabReset(() => {
       setSearchQuery('');
       setSelectedCategory('All');
       setNotificationsModalOpen(false);
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
     return unsubscribe;
   }, []);
@@ -357,6 +359,7 @@ export default function BrandDashboardScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={filteredDeals}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

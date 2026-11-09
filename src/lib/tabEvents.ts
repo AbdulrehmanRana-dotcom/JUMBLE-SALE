@@ -135,3 +135,23 @@ export const onBrandProfileTabReset = (listener: Listener) => {
     brandProfileResetListeners.delete(listener);
   };
 };
+
+// 5. Brand Agent Tab Reset (Scrolls chat to bottom and resets input)
+const brandAgentResetListeners = new Set<Listener>();
+
+export const emitBrandAgentTabReset = () => {
+  brandAgentResetListeners.forEach((l) => {
+    try {
+      l();
+    } catch (e) {
+      console.warn('[tabEvents] Error in brand agent reset listener:', e);
+    }
+  });
+};
+
+export const onBrandAgentTabReset = (listener: Listener) => {
+  brandAgentResetListeners.add(listener);
+  return () => {
+    brandAgentResetListeners.delete(listener);
+  };
+};

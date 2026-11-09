@@ -43,6 +43,7 @@ import {
   toggleDealPin,
 } from '@/lib/dealStore';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { onBrandProfileTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import { radii, spacing, typography } from '@/theme';
 import type { Brand, Deal } from '@/types/database.types';
@@ -64,6 +65,19 @@ export default function BrandProfileScreen() {
   const queryClient = useQueryClient();
 
   const [activeView, setActiveView] = useState<ProfileViewMode>('menu');
+  const menuScrollViewRef = React.useRef<ScrollView>(null);
+
+  // Instagram-style: Tapping Profile in bottom nav resets back to main menu & scrolls to top
+  React.useEffect(() => {
+    const unsubscribe = onBrandProfileTabReset(() => {
+      setActiveView('menu');
+      setInsightsDeal(null);
+      menuScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      refetchDeals();
+      refetchBrand();
+    });
+    return unsubscribe;
+  }, []);
 
   // Notifications Toggle States
   const [emailAlerts, setEmailAlerts] = useState(true);
@@ -784,7 +798,7 @@ export default function BrandProfileScreen() {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={menuScrollViewRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionHeaderTitle}>Management</Text>
           <View style={styles.menuGroupCard}>
             <Pressable
@@ -904,7 +918,7 @@ export default function BrandProfileScreen() {
           <View style={{ width: 30 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={menuScrollViewRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {/* Live Brand Analytics Dashboard (5 Real Metrics + 7-Day Trend Graph) */}
           <BrandAnalyticsDashboard
             brandId={activeBrandId}
@@ -1195,7 +1209,7 @@ export default function BrandProfileScreen() {
           <View style={{ width: 30 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={menuScrollViewRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.cardBox}>
             <Text style={styles.coverPhotoPendingText}>Cover Photo: Pending Update</Text>
 
@@ -1287,7 +1301,7 @@ export default function BrandProfileScreen() {
           <View style={{ width: 30 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={menuScrollViewRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.cardBox}>
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Email Alerts</Text>

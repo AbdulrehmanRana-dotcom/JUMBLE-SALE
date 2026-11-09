@@ -17,6 +17,7 @@ import {
 
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
+import { onBrandAgentTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
 import { radii, spacing, typography } from '@/theme';
 
@@ -77,6 +78,15 @@ export default function BrandAgentScreen() {
 
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+
+  // Instagram-style: Tapping Agent in bottom nav clears draft and scrolls chat to end
+  useEffect(() => {
+    const unsubscribe = onBrandAgentTabReset(() => {
+      setInputMessage('');
+      flatListRef.current?.scrollToEnd({ animated: true });
+    });
+    return unsubscribe;
+  }, []);
 
   // Initial welcome message from Bhai
   const [messages, setMessages] = useState<ChatMessage[]>([

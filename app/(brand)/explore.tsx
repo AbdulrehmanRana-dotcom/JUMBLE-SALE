@@ -29,12 +29,14 @@ export default function BrandExploreScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string | null>(null);
+  const flatListRef = React.useRef<FlatList>(null);
 
-  // Instagram-style: Tapping Explore in bottom nav clears filters and query
+  // Instagram-style: Tapping Explore in bottom nav clears filters and query & scrolls to top
   React.useEffect(() => {
     const unsubscribe = onBrandExploreTabReset(() => {
       setSearchQuery('');
       setSelectedBrandFilter(null);
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
     return unsubscribe;
   }, []);
@@ -205,6 +207,7 @@ export default function BrandExploreScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={filteredDeals}
           keyExtractor={(item) => item.id}
           numColumns={2}

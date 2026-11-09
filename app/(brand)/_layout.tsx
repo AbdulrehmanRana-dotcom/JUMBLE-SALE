@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 
 import {
+  emitBrandAgentTabReset,
   emitBrandExploreTabReset,
   emitBrandHomeTabReset,
   emitBrandPostsTabReset,
@@ -96,6 +97,11 @@ export default function BrandLayout() {
       {/* 4. Agent Tab (AI Marketing Agent) */}
       <Tabs.Screen
         name="agent"
+        listeners={() => ({
+          tabPress: () => {
+            emitBrandAgentTabReset();
+          },
+        })}
         options={{
           title: 'Agent',
           tabBarIcon: ({ color, focused }) => (

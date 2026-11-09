@@ -253,7 +253,7 @@ export default function AdminDashboardScreen() {
     queryFn: async () => {
       return await fetchRegisteredBrandsList();
     },
-    enabled: activeTab === 'brands' || activeTab === 'directory' || activeTab === 'overview' || activeTab === 'growth_tools',
+    enabled: true, // Always ready for instant global omnibar search
   });
 
   // ─── Pure DB Registered Shoppers Monitoring Query ─────────────────
@@ -266,7 +266,7 @@ export default function AdminDashboardScreen() {
     queryFn: async () => {
       return await fetchRegisteredShoppersList();
     },
-    enabled: activeTab === 'users' || activeTab === 'directory' || activeTab === 'management' || activeTab === 'overview',
+    enabled: true, // Always ready for instant global omnibar search
   });
 
   // ─── Pure DB App System Activity Overview Query ───────────────────
@@ -442,7 +442,7 @@ export default function AdminDashboardScreen() {
       } catch {}
       return localDeals;
     },
-    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
+    enabled: true, // Always ready for instant global omnibar search
   });
 
   const {
@@ -453,7 +453,7 @@ export default function AdminDashboardScreen() {
     queryFn: async () => {
       return await getLocalCategories();
     },
-    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
+    enabled: true, // Always ready for instant global omnibar search
   });
 
   const {
@@ -469,7 +469,7 @@ export default function AdminDashboardScreen() {
       } catch {}
       return await getAllOrdersForAdmin();
     },
-    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
+    enabled: true, // Always ready for instant global omnibar search
   });
 
   // ─── 5. Reports Query ─────────────────────────────────────────────
@@ -576,6 +576,292 @@ export default function AdminDashboardScreen() {
       setLoadingUserIntelligence(false);
     }
   };
+
+  // ─── GLOBAL ADMIN OMNISEARCH / COMMAND PALETTE ENGINE ──────────────
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return null;
+
+    // 1. Available Admin Quick Actions & Navigation
+    const allActions: {
+      id: string;
+      title: string;
+      subtitle: string;
+      category: 'action';
+      icon: keyof typeof Ionicons.glyphMap;
+      iconColor: string;
+      iconBg: string;
+      keywords: string[];
+      onPress: () => void;
+    }[] = [
+      {
+        id: 'act-notifications',
+        title: 'Notification Center',
+        subtitle: 'View admin alerts, messages & notification logs',
+        category: 'action',
+        icon: 'notifications-outline',
+        iconColor: '#A855F7',
+        iconBg: 'rgba(168, 85, 247, 0.15)',
+        keywords: ['notification', 'notifications', 'alert', 'alerts', 'center', 'inbox', 'bell', 'messages'],
+        onPress: () => {
+          setNotificationsModalOpen(true);
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-broadcast',
+        title: 'Broadcast Announcement',
+        subtitle: 'Send real-time push notification to all users and brands',
+        category: 'action',
+        icon: 'megaphone-outline',
+        iconColor: '#F59E0B',
+        iconBg: 'rgba(245, 158, 11, 0.15)',
+        keywords: ['broadcast', 'announcement', 'send alert', 'blast', 'push notification'],
+        onPress: () => {
+          handleTabResetOrSwitch('growth_tools');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-overview',
+        title: 'Overview Dashboard',
+        subtitle: 'Platform statistics, KPIs, active deals and performance',
+        category: 'action',
+        icon: 'grid-outline',
+        iconColor: adminTheme.neon,
+        iconBg: adminTheme.neonLight,
+        keywords: ['overview', 'dashboard', 'stats', 'kpi', 'analytics', 'home', 'main'],
+        onPress: () => {
+          handleTabResetOrSwitch('overview');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-brands-dir',
+        title: 'Brands Directory',
+        subtitle: `Manage ${registeredBrands.length} registered brand partners`,
+        category: 'action',
+        icon: 'business-outline',
+        iconColor: adminTheme.neon,
+        iconBg: adminTheme.neonLight,
+        keywords: ['brands', 'brand directory', 'registered brands', 'partners', 'sellers', 'stores'],
+        onPress: () => {
+          handleTabResetOrSwitch('brands');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-shoppers-dir',
+        title: 'Shoppers Directory',
+        subtitle: `Manage ${registeredShoppers.length} consumer shopper accounts`,
+        category: 'action',
+        icon: 'people-outline',
+        iconColor: '#10B981',
+        iconBg: 'rgba(16, 185, 129, 0.15)',
+        keywords: ['users', 'shoppers', 'customers', 'consumers', 'user directory', 'accounts'],
+        onPress: () => {
+          handleTabResetOrSwitch('users');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-brands-queue',
+        title: 'Brand Approvals Queue',
+        subtitle: `${stats?.pendingBrands || 0} brand partner registration requests pending`,
+        category: 'action',
+        icon: 'business',
+        iconColor: '#3B82F6',
+        iconBg: 'rgba(59, 130, 246, 0.15)',
+        keywords: ['brand approvals', 'brand queue', 'pending brands', 'partner requests', 'queue'],
+        onPress: () => {
+          handleTabResetOrSwitch('brands_queue');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-deals-queue',
+        title: 'Deal Verifications Queue',
+        subtitle: `${stats?.pendingDeals || 0} deals pending verification and approval`,
+        category: 'action',
+        icon: 'pricetag-outline',
+        iconColor: '#F59E0B',
+        iconBg: 'rgba(245, 158, 11, 0.15)',
+        keywords: ['deal verifications', 'deals queue', 'pending deals', 'verify deal', 'queue'],
+        onPress: () => {
+          handleTabResetOrSwitch('deals_queue');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-sponsored-deals',
+        title: 'Sponsored Deals & Hero Pin',
+        subtitle: 'Pin promotions to top position #1 in Pakistan Hero Slider',
+        category: 'action',
+        icon: 'star-outline',
+        iconColor: adminTheme.neon,
+        iconBg: adminTheme.neonLight,
+        keywords: ['sponsored', 'pin', 'hero slider', 'promoted', 'monetization', 'boost'],
+        onPress: () => {
+          handleTabResetOrSwitch('growth_tools');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-categories',
+        title: 'Categories & Festivals Manager',
+        subtitle: 'Add, update or delete shopping marketplace categories',
+        category: 'action',
+        icon: 'apps-outline',
+        iconColor: '#A855F7',
+        iconBg: 'rgba(168, 85, 247, 0.15)',
+        keywords: ['categories', 'category', 'festivals', 'shopping categories', 'departments'],
+        onPress: () => {
+          handleTabResetOrSwitch('growth_tools');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-csv-export',
+        title: 'CSV Data Export',
+        subtitle: 'Export Brands, Deals, and Attributed Orders as CSV spreadsheet',
+        category: 'action',
+        icon: 'download-outline',
+        iconColor: '#3B82F6',
+        iconBg: 'rgba(59, 130, 246, 0.15)',
+        keywords: ['export', 'csv', 'download', 'excel', 'backup', 'data export', 'orders'],
+        onPress: () => {
+          handleTabResetOrSwitch('growth_tools');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-link-quality',
+        title: 'Quality & Link Health Scanner',
+        subtitle: 'Scan deal links and promotional images for broken URLs',
+        category: 'action',
+        icon: 'shield-checkmark-outline',
+        iconColor: '#10B981',
+        iconBg: 'rgba(16, 185, 129, 0.15)',
+        keywords: ['quality', 'scanner', 'broken links', 'image check', 'audit deals'],
+        onPress: () => {
+          handleTabResetOrSwitch('growth_tools');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-user-reports',
+        title: 'User Reports & Safety Moderation',
+        subtitle: `${stats?.pendingReports || 0} user moderation flags and reported deals`,
+        category: 'action',
+        icon: 'flag-outline',
+        iconColor: adminTheme.error,
+        iconBg: adminTheme.errorBg,
+        keywords: ['reports', 'report', 'safety', 'flagged', 'abuse', 'spam', 'complaints'],
+        onPress: () => {
+          handleTabResetOrSwitch('reports');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-audit-trail',
+        title: 'Audit Trail & Security Logs',
+        subtitle: 'Live immutable record of administrative actions and approvals',
+        category: 'action',
+        icon: 'newspaper-outline',
+        iconColor: adminTheme.neon,
+        iconBg: adminTheme.neonLight,
+        keywords: ['audit', 'audit trail', 'logs', 'security', 'operations', 'admin history'],
+        onPress: () => {
+          handleTabResetOrSwitch('audit_log');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-app-activity',
+        title: 'App Activity & Live Engagement',
+        subtitle: 'Shopper claims, brand post metrics, and traffic overview',
+        category: 'action',
+        icon: 'pulse-outline',
+        iconColor: '#3B82F6',
+        iconBg: 'rgba(59, 130, 246, 0.15)',
+        keywords: ['activity', 'app activity', 'traffic', 'claims', 'analytics', 'live metrics'],
+        onPress: () => {
+          handleTabResetOrSwitch('activity_monitoring');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-admin-settings',
+        title: 'Admin Settings & Session',
+        subtitle: 'Super Administrator credentials, active session & system info',
+        category: 'action',
+        icon: 'settings-outline',
+        iconColor: adminTheme.neon,
+        iconBg: adminTheme.neonLight,
+        keywords: ['settings', 'admin settings', 'profile', 'session', 'system', 'root'],
+        onPress: () => {
+          handleTabResetOrSwitch('more');
+          setSearchQuery('');
+        },
+      },
+      {
+        id: 'act-sign-out',
+        title: 'Sign Out of Admin Portal',
+        subtitle: 'End administrative session on this device',
+        category: 'action',
+        icon: 'log-out-outline',
+        iconColor: adminTheme.error,
+        iconBg: adminTheme.errorBg,
+        keywords: ['sign out', 'logout', 'exit', 'disconnect'],
+        onPress: () => {
+          setSearchQuery('');
+          signOut();
+        },
+      },
+    ];
+
+    const matchedActions = allActions.filter((act) => {
+      if (act.title.toLowerCase().includes(q)) return true;
+      if (act.subtitle.toLowerCase().includes(q)) return true;
+      return act.keywords.some((k) => k.includes(q) || q.includes(k));
+    });
+
+    // 2. Matching Brands
+    const matchedBrands = registeredBrands.filter((b) => {
+      const name = b.name.toLowerCase();
+      const email = (b.business_email || '').toLowerCase();
+      const cat = (b.category || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || cat.includes(q);
+    }).slice(0, 5);
+
+    // 3. Matching Deals
+    const matchedDeals = allDealsForAdmin.filter((d) => {
+      const title = (d.title || '').toLowerCase();
+      const desc = (d.description || '').toLowerCase();
+      const cat = (d.category?.name || '').toLowerCase();
+      const brandName = (d.brand?.name || '').toLowerCase();
+      return title.includes(q) || desc.includes(q) || cat.includes(q) || brandName.includes(q);
+    }).slice(0, 5);
+
+    // 4. Matching Users / Shoppers
+    const matchedUsers = registeredShoppers.filter((u) => {
+      const name = (u.display_name || '').toLowerCase();
+      const email = (u.email || '').toLowerCase();
+      return name.includes(q) || email.includes(q);
+    }).slice(0, 5);
+
+    const totalCount =
+      matchedActions.length + matchedBrands.length + matchedDeals.length + matchedUsers.length;
+
+    return {
+      query: q,
+      totalCount,
+      actions: matchedActions,
+      brands: matchedBrands,
+      deals: matchedDeals,
+      users: matchedUsers,
+    };
+  }, [searchQuery, registeredBrands, allDealsForAdmin, registeredShoppers, stats, signOut]);
 
   const handleToggleDealStatus = async (deal: Deal) => {
     const isSuspended = deal.status === 'suspended';
@@ -2762,6 +3048,178 @@ export default function AdminDashboardScreen() {
             </View>
           </View>
 
+          {/* Live Omnibar / Global Search Dropdown Overlay */}
+          {searchResults && (
+            <>
+              <Pressable
+                style={styles.searchOverlayBackdrop}
+                onPress={() => setSearchQuery('')}
+              />
+              <View style={[styles.searchDropdown, isDesktop && styles.searchDropdownDesktop]}>
+                <View style={styles.searchDropdownHeader}>
+                  <Text style={styles.searchDropdownHeaderTitle}>
+                    {searchResults.totalCount > 0
+                      ? `${searchResults.totalCount} matches found for "${searchQuery}"`
+                      : 'Search Results'}
+                  </Text>
+                  <Pressable onPress={() => setSearchQuery('')} hitSlop={6}>
+                    <Ionicons name="close" size={18} color={adminTheme.textSecondary} />
+                  </Pressable>
+                </View>
+
+                <ScrollView
+                  style={{ maxHeight: isDesktop ? 480 : 380 }}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}>
+                  {searchResults.totalCount === 0 ? (
+                    <View style={styles.searchEmptyBox}>
+                      <View style={styles.searchEmptyIconWrap}>
+                        <Ionicons name="search-outline" size={30} color={adminTheme.textMuted} />
+                      </View>
+                      <Text style={styles.searchEmptyTitle}>No Results Found</Text>
+                      <Text style={styles.searchEmptyDesc}>
+                        No admin tools, brands, deals, or users matched "{searchQuery}".
+                      </Text>
+                      <View style={styles.searchSuggestionsBox}>
+                        <Text style={styles.searchSuggestionsTitle}>Try searching for:</Text>
+                        <View style={styles.searchSuggestionChips}>
+                          {['Notification', 'Brands', 'Deals', 'Shoppers', 'Queues', 'Reports', 'Settings'].map((chip) => (
+                            <Pressable
+                              key={chip}
+                              style={styles.searchSuggestionChip}
+                              onPress={() => setSearchQuery(chip.toLowerCase())}>
+                              <Text style={styles.searchSuggestionChipText}>{chip}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      {/* Section: Quick Actions & Navigation */}
+                      {searchResults.actions.length > 0 && (
+                        <View>
+                          <Text style={styles.searchSectionTitle}>
+                            QUICK ACTIONS & NAVIGATION ({searchResults.actions.length})
+                          </Text>
+                          {searchResults.actions.map((act) => (
+                            <Pressable
+                              key={act.id}
+                              style={styles.searchResultRow}
+                              onPress={() => {
+                                act.onPress();
+                                setSearchQuery('');
+                              }}>
+                              <View style={[styles.searchResultIconBox, { backgroundColor: act.iconBg }]}>
+                                <Ionicons name={act.icon} size={18} color={act.iconColor} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.searchResultTitle}>{act.title}</Text>
+                                <Text style={styles.searchResultSubtitle}>{act.subtitle}</Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color={adminTheme.textMuted} />
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Section: Matching Brands */}
+                      {searchResults.brands.length > 0 && (
+                        <View>
+                          <Text style={styles.searchSectionTitle}>
+                            BRANDS ({searchResults.brands.length})
+                          </Text>
+                          {searchResults.brands.map((brand) => (
+                            <Pressable
+                              key={brand.id}
+                              style={styles.searchResultRow}
+                              onPress={() => {
+                                handleInspectBrand(brand);
+                                setSearchQuery('');
+                              }}>
+                              <View style={[styles.searchResultIconBox, { backgroundColor: adminTheme.neonLight }]}>
+                                <Ionicons name="business" size={18} color={adminTheme.neon} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.searchResultTitle}>{brand.name}</Text>
+                                <Text style={styles.searchResultSubtitle}>
+                                  Brand Partner • {brand.category || 'All Categories'} • {brand.status.toUpperCase()}
+                                </Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color={adminTheme.textMuted} />
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Section: Matching Deals */}
+                      {searchResults.deals.length > 0 && (
+                        <View>
+                          <Text style={styles.searchSectionTitle}>
+                            PROMOTIONS & DEALS ({searchResults.deals.length})
+                          </Text>
+                          {searchResults.deals.map((deal) => (
+                            <Pressable
+                              key={deal.id}
+                              style={styles.searchResultRow}
+                              onPress={() => {
+                                if (deal.brand) {
+                                  handleInspectBrand(deal.brand);
+                                } else {
+                                  handleTabResetOrSwitch('growth_tools');
+                                }
+                                setSearchQuery('');
+                              }}>
+                              <View style={[styles.searchResultIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                                <Ionicons name="pricetag" size={18} color={adminTheme.warning} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.searchResultTitle}>{deal.title}</Text>
+                                <Text style={styles.searchResultSubtitle}>
+                                  {deal.brand?.name || 'Deal'} • {deal.discount_percentage ? deal.discount_percentage + '% OFF' : 'Discount'} • {deal.status.toUpperCase()}
+                                </Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color={adminTheme.textMuted} />
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Section: Matching Users */}
+                      {searchResults.users.length > 0 && (
+                        <View>
+                          <Text style={styles.searchSectionTitle}>
+                            SHOPPERS & USERS ({searchResults.users.length})
+                          </Text>
+                          {searchResults.users.map((user) => (
+                            <Pressable
+                              key={user.id}
+                              style={styles.searchResultRow}
+                              onPress={() => {
+                                handleInspectUser(user);
+                                setSearchQuery('');
+                              }}>
+                              <View style={[styles.searchResultIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+                                <Ionicons name="person" size={18} color={adminTheme.info} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.searchResultTitle}>{user.display_name || user.email}</Text>
+                                <Text style={styles.searchResultSubtitle}>
+                                  Registered Shopper • {user.email} • {user.is_active ? 'Active' : 'Suspended'}
+                                </Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color={adminTheme.textMuted} />
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  )}
+                </ScrollView>
+              </View>
+            </>
+          )}
+
           {/* Screen Body */}
           <View style={{ flex: 1 }}>
             {activeTab === 'overview' && renderOverview()}
@@ -3469,6 +3927,8 @@ const styles = StyleSheet.create({
   mainContentPane: {
     flex: 1,
     backgroundColor: adminTheme.bgApp,
+    position: 'relative',
+    zIndex: 100,
   },
   topHeader: {
     flexDirection: 'row',
@@ -3598,6 +4058,157 @@ const styles = StyleSheet.create({
   },
   headerLogoutBtn: {
     padding: 6,
+  },
+
+  // Omnibar & Search Dropdown
+  searchOverlayBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    zIndex: 9998,
+  },
+  searchDropdown: {
+    position: 'absolute',
+    top: 56,
+    left: spacing[3],
+    right: spacing[3],
+    backgroundColor: adminTheme.bgCard,
+    borderWidth: 1,
+    borderColor: adminTheme.borderLight,
+    borderRadius: radii.lg,
+    zIndex: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    elevation: 24,
+    overflow: 'hidden',
+  },
+  searchDropdownDesktop: {
+    left: 48,
+    right: 'auto',
+    width: 500,
+  },
+  searchDropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    backgroundColor: adminTheme.bgSidebar,
+    borderBottomWidth: 1,
+    borderBottomColor: adminTheme.border,
+  },
+  searchDropdownHeaderTitle: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '700',
+    color: adminTheme.neon,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  searchSectionTitle: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '800',
+    color: adminTheme.textMuted,
+    letterSpacing: 0.8,
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[1],
+    backgroundColor: adminTheme.bgCard,
+  },
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    gap: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  searchResultIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchResultTitle: {
+    ...typography.bodyMedium,
+    fontSize: 13,
+    fontWeight: '700',
+    color: adminTheme.textPrimary,
+  },
+  searchResultSubtitle: {
+    ...typography.caption,
+    fontSize: 11,
+    color: adminTheme.textMuted,
+    marginTop: 1,
+  },
+  searchEmptyBox: {
+    padding: spacing[6],
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  searchEmptyIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: adminTheme.bgInput,
+    borderWidth: 1,
+    borderColor: adminTheme.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[1],
+  },
+  searchEmptyTitle: {
+    ...typography.bodyMedium,
+    fontSize: 15,
+    fontWeight: '800',
+    color: adminTheme.textPrimary,
+  },
+  searchEmptyDesc: {
+    ...typography.caption,
+    fontSize: 12,
+    color: adminTheme.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: spacing[4],
+  },
+  searchSuggestionsBox: {
+    marginTop: spacing[3],
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  searchSuggestionsTitle: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: adminTheme.textMuted,
+  },
+  searchSuggestionChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: spacing[2],
+  },
+  searchSuggestionChip: {
+    backgroundColor: adminTheme.neonLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: adminTheme.neonGlow,
+  },
+  searchSuggestionChipText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '700',
+    color: adminTheme.neon,
   },
 
   // Segmented Control Switcher

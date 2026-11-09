@@ -2358,7 +2358,7 @@ export default function AdminDashboardScreen() {
     );
   };
 
-  // ─── RENDER: 8. MORE SUB-VIEW (Reports, Audit Trail, Activity, Account & Logout) ────
+  // ─── RENDER: 8. SETTINGS & SYSTEM SUB-VIEW (Reports, Audit Trail, Activity, Account & Logout) ────
   const renderMore = () => {
     if (moreSubTab === 'reports') {
       return (
@@ -2366,7 +2366,7 @@ export default function AdminDashboardScreen() {
           <View style={styles.subviewHeader}>
             <Pressable onPress={() => setMoreSubTab('menu')} style={styles.subviewBackBtn}>
               <Ionicons name="arrow-back" size={18} color={adminTheme.neon} />
-              <Text style={styles.subviewBackText}>Back to More</Text>
+              <Text style={styles.subviewBackText}>Back to Settings</Text>
             </Pressable>
             <Text style={styles.subviewHeaderTitle}>User Reports & Safety</Text>
             <View style={{ width: 70 }} />
@@ -2382,7 +2382,7 @@ export default function AdminDashboardScreen() {
           <View style={styles.subviewHeader}>
             <Pressable onPress={() => setMoreSubTab('menu')} style={styles.subviewBackBtn}>
               <Ionicons name="arrow-back" size={18} color={adminTheme.neon} />
-              <Text style={styles.subviewBackText}>Back to More</Text>
+              <Text style={styles.subviewBackText}>Back to Settings</Text>
             </Pressable>
             <Text style={styles.subviewHeaderTitle}>Audit Trail & System Logs</Text>
             <View style={{ width: 70 }} />
@@ -2398,7 +2398,7 @@ export default function AdminDashboardScreen() {
           <View style={styles.subviewHeader}>
             <Pressable onPress={() => setMoreSubTab('menu')} style={styles.subviewBackBtn}>
               <Ionicons name="arrow-back" size={18} color={adminTheme.neon} />
-              <Text style={styles.subviewBackText}>Back to More</Text>
+              <Text style={styles.subviewBackText}>Back to Settings</Text>
             </Pressable>
             <Text style={styles.subviewHeaderTitle}>App Activity Monitoring</Text>
             <View style={{ width: 70 }} />
@@ -3070,9 +3070,9 @@ export default function AdminDashboardScreen() {
             },
             {
               id: 'more' as AdminTab,
-              label: 'More',
-              icon: 'menu',
-              iconOutline: 'menu-outline',
+              label: 'Settings',
+              icon: 'settings',
+              iconOutline: 'settings-outline',
               badge: stats?.pendingReports || 0,
             },
           ].map((tabItem) => {

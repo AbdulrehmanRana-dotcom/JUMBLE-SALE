@@ -558,3 +558,96 @@ export async function checkExpiringSavedDeals(
     console.warn('[NotificationStore] Expiring deals check notice:', err);
   }
 }
+
+/**
+ * Platform-wide announcement broadcast (Users, Brands, or Everyone)
+ * Dispatches to local store, real-time in-flight banners, and Supabase notifications table.
+ */
+export async function broadcastNotification(payload: {
+  target: 'all' | 'consumers' | 'brands';
+  title: string;
+  body: string;
+  action_url?: string | null;
+}): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const notifId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `bcast-${Date.now()}`;
+
+  // 1. Dispatch real-time in-flight banner on active client screens
+  try {
+    emitInFlightNotification({
+      id: notifId,
+      user_id: 'broadcast',
+      role: payload.target === 'brands' ? 'brand' : 'consumer',
+      category: 'system',
+      title: payload.title,
+      body: payload.body,
+      action_url: payload.action_url || null,
+      is_read: false,
+      created_at: timestamp,
+    });
+  } catch (err) {
+    console.warn('[NotificationStore] In-flight broadcast error:', err);
+  }
+
+  // 2. Add to Consumer store
+  if (payload.target === 'all' || payload.target === 'consumers') {
+    try {
+      const defKey = `${STORAGE_PREFIX}consumer_default`;
+      const raw = await AsyncStorage.getItem(defKey);
+      const list: AppNotification[] = raw ? JSON.parse(raw) : [];
+      list.unshift({
+        id: `${notifId}-consumer`,
+        user_id: 'default',
+        role: 'consumer',
+        category: 'system',
+        title: payload.title,
+        body: payload.body,
+        action_url: payload.action_url || null,
+        is_read: false,
+        created_at: timestamp,
+      });
+      await AsyncStorage.setItem(defKey, JSON.stringify(list.slice(0, 100)));
+    } catch {}
+  }
+
+  // 3. Add to Brand store
+  if (payload.target === 'all' || payload.target === 'brands') {
+    try {
+      const defKey = `${STORAGE_PREFIX}brand_default`;
+      const raw = await AsyncStorage.getItem(defKey);
+      const list: AppNotification[] = raw ? JSON.parse(raw) : [];
+      list.unshift({
+        id: `${notifId}-brand`,
+        user_id: 'default',
+        role: 'brand',
+        category: 'system',
+        title: payload.title,
+        body: payload.body,
+        action_url: payload.action_url || null,
+        is_read: false,
+        created_at: timestamp,
+      });
+      await AsyncStorage.setItem(defKey, JSON.stringify(list.slice(0, 100)));
+    } catch {}
+  }
+
+  // 4. Record to Supabase notifications table if configured
+  if (isSupabaseConfigured) {
+    try {
+      await (supabase.from('notifications') as any).insert([
+        {
+          id: notifId,
+          role: payload.target === 'brands' ? 'brand' : 'consumer',
+          category: 'system',
+          title: payload.title,
+          body: payload.body,
+          action_url: payload.action_url || null,
+          is_read: false,
+          created_at: timestamp,
+        },
+      ]);
+    } catch (err) {
+      console.warn('[NotificationStore] Broadcast Supabase note:', err);
+    }
+  }
+}

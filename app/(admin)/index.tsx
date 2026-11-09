@@ -72,6 +72,10 @@ import { BrandDetailDrawer } from '@/components/admin/BrandDetailDrawer';
 import { AdminUsersSection } from '@/components/admin/AdminUsersSection';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { AdminAppActivitySection } from '@/components/admin/AdminAppActivitySection';
+import { AdminGrowthToolsSection } from '@/components/admin/AdminGrowthToolsSection';
+import { getLocalCategories } from '@/lib/categoryStore';
+import { getAllOrdersForAdmin } from '@/lib/orderStore';
+import type { Category } from '@/types/database.types';
 
 // ─── NEON GREEN & BLACK THEME PALETTE ─────────────────────────────
 const adminTheme = {
@@ -103,6 +107,7 @@ type AdminTab =
   | 'brands'
   | 'users'
   | 'activity_monitoring'
+  | 'growth_tools'
   | 'overview'
   | 'directory'
   | 'management'
@@ -366,7 +371,58 @@ export default function AdminDashboardScreen() {
         return localBrands.filter((b) => !deletedIds.includes(b.id));
       }
     },
-    enabled: activeTab === 'management' || activeTab === 'directory' || activeTab === 'overview',
+    enabled: activeTab === 'management' || activeTab === 'directory' || activeTab === 'overview' || activeTab === 'growth_tools',
+  });
+
+  // ─── 4b. Growth Tools: All Deals, Categories, Orders Queries ────────
+  const {
+    data: allDealsForAdmin = [],
+    refetch: refetchAllDeals,
+  } = useQuery<Deal[]>({
+    queryKey: ['admin-growth-all-deals'],
+    queryFn: async () => {
+      const localDeals = await getLocalBrandDeals();
+      try {
+        const { data, error } = await supabase
+          .from('deals')
+          .select('*, brand:brands(*)')
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const serverIds = new Set(data.map((d: any) => d.id));
+          const missingLocal = localDeals.filter((ld) => !serverIds.has(ld.id));
+          return [...(data as Deal[]), ...missingLocal];
+        }
+      } catch {}
+      return localDeals;
+    },
+    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
+  });
+
+  const {
+    data: adminCategories = [],
+    refetch: refetchAdminCategories,
+  } = useQuery<Category[]>({
+    queryKey: ['admin-categories-list'],
+    queryFn: async () => {
+      return await getLocalCategories();
+    },
+    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
+  });
+
+  const {
+    data: adminOrders = [],
+  } = useQuery<any[]>({
+    queryKey: ['admin-orders-list'],
+    queryFn: async () => {
+      try {
+        const { data } = await (supabase.from('attributed_orders') as any)
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (data && data.length > 0) return data;
+      } catch {}
+      return await getAllOrdersForAdmin();
+    },
+    enabled: activeTab === 'growth_tools' || activeTab === 'overview',
   });
 
   // ─── 5. Reports Query ─────────────────────────────────────────────
@@ -2344,6 +2400,15 @@ export default function AdminDashboardScreen() {
           onPress={() => handleTabResetOrSwitch('activity_monitoring')}
         />
 
+        {/* Section: GROWTH & MONETIZATION */}
+        <Text style={styles.sidebarSectionTitle}>GROWTH & MONETIZATION</Text>
+        <SidebarNavItem
+          icon="star"
+          label="Growth & Sponsored"
+          active={activeTab === 'growth_tools'}
+          onPress={() => handleTabResetOrSwitch('growth_tools')}
+        />
+
         {/* Section: SYSTEM */}
         <Text style={styles.sidebarSectionTitle}>SYSTEM & LOGS</Text>
         <SidebarNavItem
@@ -2517,6 +2582,12 @@ export default function AdminDashboardScreen() {
                 onPress={() => handleTabResetOrSwitch('reports')}
               />
               <QuickNavBtn
+                label="Growth & Tools"
+                icon="star-outline"
+                active={activeTab === 'growth_tools'}
+                onPress={() => handleTabResetOrSwitch('growth_tools')}
+              />
+              <QuickNavBtn
                 label="Audit Trail"
                 icon="newspaper-outline"
                 active={activeTab === 'audit_log'}
@@ -2552,6 +2623,16 @@ export default function AdminDashboardScreen() {
                 metrics={appActivityMetrics ?? null}
                 loading={loadingAppActivity}
                 onRefresh={refetchAppActivity}
+              />
+            )}
+            {activeTab === 'growth_tools' && (
+              <AdminGrowthToolsSection
+                deals={allDealsForAdmin}
+                brands={allBrands}
+                categories={adminCategories}
+                orders={adminOrders}
+                onRefetchDeals={refetchAllDeals}
+                onRefetchCategories={refetchAdminCategories}
               />
             )}
             {activeTab === 'overview' && renderOverview()}

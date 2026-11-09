@@ -94,3 +94,53 @@ export async function getLocalCategories(): Promise<Category[]> {
   AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(DEFAULT_CATEGORIES)).catch(() => {});
   return DEFAULT_CATEGORIES;
 }
+
+/**
+ * Add a new category directly to database and local store
+ */
+export async function addCategory(category: { name: string; icon: string }): Promise<Category> {
+  const current = await getLocalCategories();
+  const newCat: Category = {
+    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cat-${Date.now()}`,
+    name: category.name.trim(),
+    icon: category.icon || 'pricetag-outline',
+  };
+
+  const updated = [...current.filter((c) => c.name.toLowerCase() !== newCat.name.toLowerCase()), newCat];
+  memoryCategoriesCache = updated;
+  await AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated));
+
+  if (isSupabaseConfigured) {
+    try {
+      await (supabase.from('categories') as any).upsert({
+        id: newCat.id,
+        name: newCat.name,
+        icon: newCat.icon,
+      }, { onConflict: 'id' });
+    } catch (err) {
+      console.warn('[CategoryStore] Supabase insert note:', err);
+    }
+  }
+
+  return newCat;
+}
+
+/**
+ * Remove a category from database and local store
+ */
+export async function removeCategory(categoryId: string): Promise<boolean> {
+  const current = await getLocalCategories();
+  const updated = current.filter((c) => c.id !== categoryId);
+  memoryCategoriesCache = updated;
+  await AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(updated));
+
+  if (isSupabaseConfigured) {
+    try {
+      await (supabase.from('categories') as any).delete().eq('id', categoryId);
+    } catch (err) {
+      console.warn('[CategoryStore] Supabase delete note:', err);
+    }
+  }
+
+  return true;
+}

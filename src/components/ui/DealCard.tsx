@@ -20,6 +20,7 @@ export type DealCardProps = {
   originalPrice?: number | string | null;
   imageUri?: string | null;
   expiresLabel?: string;
+  isSponsored?: boolean;
   liked?: boolean;
   saved?: boolean;
   likesCount?: number;
@@ -40,6 +41,7 @@ export function DealCard({
   originalPrice,
   imageUri,
   expiresLabel,
+  isSponsored = false,
   liked = false,
   saved = false,
   likesCount,
@@ -92,6 +94,14 @@ export function DealCard({
         <View style={styles.discountBadge}>
           <Text style={styles.discountBadgeText}>{discountLabel}</Text>
         </View>
+
+        {/* Top-Right Sponsored Badge */}
+        {isSponsored ? (
+          <View style={styles.sponsoredBadge}>
+            <Ionicons name="star" size={10} color="#090A0D" />
+            <Text style={styles.sponsoredBadgeText}>SPONSORED</Text>
+          </View>
+        ) : null}
 
         {/* Bottom-Left Image Overlay Capsule for Expiry */}
         {expiresLabel ? (
@@ -261,6 +271,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.2,
+  },
+  sponsoredBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    shadowColor: '#00FF66',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+  },
+  sponsoredBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#090A0D',
+    letterSpacing: 0.5,
   },
   expiryCapsule: {
     position: 'absolute',

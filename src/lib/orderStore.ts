@@ -171,6 +171,28 @@ export async function getUserPurchases(userId: string): Promise<AttributedOrder[
 }
 
 /**
+ * Get all attributed orders for Admin platform review
+ */
+export async function getAllOrdersForAdmin(): Promise<AttributedOrder[]> {
+  let localList: AttributedOrder[] = [];
+  try {
+    const raw = await AsyncStorage.getItem(ORDERS_STORAGE_KEY);
+    if (raw) {
+      localList = JSON.parse(raw);
+    }
+  } catch {}
+
+  try {
+    const { data } = await (supabase.from('attributed_orders') as any)
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data && Array.isArray(data) && data.length > 0) return data;
+  } catch {}
+
+  return localList;
+}
+
+/**
  * Get all attributed purchases for a brand
  */
 export async function getBrandAttributedPurchases(

@@ -113,7 +113,9 @@ export default function ConsumerHomeScreen() {
     queryKey: ['featured-deals'],
     queryFn: async () => {
       const localDeals = await getLocalBrandDeals();
-      return localDeals.filter(isDealActive);
+      return localDeals
+        .filter(isDealActive)
+        .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0));
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -536,6 +538,7 @@ export default function ConsumerHomeScreen() {
                         brandName={item.brand_name || item.brand?.name || 'Khaadi'}
                         brandLogo={item.brand?.logo_url || item.brand_logo}
                         discountLabel={`${item.discount_pct}% OFF`}
+                        isSponsored={Boolean(item.is_pinned)}
                         price={(item as any).price || (item as any).discount_price || null}
                         originalPrice={(item as any).original_price || null}
                         imageUri={item.image_urls?.[0]}

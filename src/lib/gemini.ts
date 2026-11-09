@@ -1,9 +1,27 @@
-import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocalBrandDeals } from '@/lib/dealStore';
+import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import type { Deal } from '@/types/database.types';
 
 // ==============================================================================
 // 1. GEMINI API CONFIGURATION & TYPES
 // ==============================================================================
+
+export async function getEffectiveGeminiKey(): Promise<string> {
+  const envKey =
+    process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    '';
+  if (envKey && envKey.trim()) return envKey.trim();
+
+  try {
+    const stored = await AsyncStorage.getItem('@jumble_gemini_api_key');
+    if (stored && stored.trim()) return stored.trim();
+  } catch {}
+
+  return '';
+}
 
 const GEMINI_API_KEY =
   process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
@@ -51,6 +69,548 @@ export const CATEGORY_UUID_MAP: Record<string, { id: string; name: string }> = {
   shoes: { id: '77777777-7777-7777-7777-777777777777', name: 'Footwear & Accessories' },
   travel: { id: '88888888-8888-8888-8888-888888888888', name: 'Travel & Experiences' },
 };
+
+// ==============================================================================
+// 2. LIVE DATABASE DEALS RETRIEVER FOR AI CONTEXT
+// ==============================================================================
+
+/**
+ * Fetches all currently active deals directly from Supabase DB, enriched with brand and category data.
+ * Falls back to local store if offline or on network error.
+ */
+export async function getLiveDatabaseDealsForAI(): Promise<Deal[]> {
+  try {
+    if (isSupabaseConfigured) {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 1500)
+      );
+      const queryPromise = supabase
+        .from('deals')
+        .select('*, brand:brands(id, name, logo_url, category), category:categories(id, name)')
+        .eq('status', 'active')
+        .order('discount_pct', { ascending: false })
+        .limit(30);
+
+      const res: any = await Promise.race([queryPromise, timeoutPromise]);
+      if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data as Deal[];
+      }
+    }
+  } catch (err) {
+    console.warn('[Gemini] Supabase live deals fetch note:', err);
+  }
+
+  // Fallback to local store
+  try {
+    const localDeals = await getLocalBrandDeals();
+    const localBrands = await getLocalBrands();
+    return localDeals
+      .filter((d) => d.status === 'active')
+      .map((d) => {
+        const brandMatch =
+          (d as any).brand ||
+          localBrands.find((b) => b.id === d.brand_id) ||
+          KHAADI_BRAND;
+        return {
+          ...d,
+          brand: brandMatch,
+          brand_name: brandMatch.name,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+// ==============================================================================
+// 3. JUMBLE BACHAT ASSISTANT (CONSUMER SHOPPING AI CONCIERGE)
+// ==============================================================================
+
+export interface AssistantResponse {
+  reply: string;
+  deals: Deal[];
+  is_off_topic: boolean;
+  language: 'roman_urdu' | 'english';
+}
+
+function runDeterministicBachatSearch(
+  query: string,
+  liveDeals: Deal[],
+  language: 'roman_urdu' | 'english'
+): AssistantResponse {
+  const lower = query.toLowerCase();
+
+  // 1. Budget Query
+  const budgetMatch = lower.match(/(?:budget|range|under|andar|tak|mein)\s*(?:rs\.?|pkr)?\s*(\d{3,6})/i) ||
+                      lower.match(/(?:rs\.?|pkr)?\s*(\d{3,6})\s*(?:budget|ke andar|tak)/i);
+
+  if (budgetMatch) {
+    const maxBudget = parseInt(budgetMatch[1], 10);
+    const affordableDeals = liveDeals.filter((d) => {
+      const price = d.discount_price || (d as any).price || (d.original_price && d.discount_pct ? Math.round(d.original_price * (1 - d.discount_pct / 100)) : 0);
+      return price > 0 && price <= maxBudget;
+    });
+
+    if (affordableDeals.length > 0) {
+      const topPick = affordableDeals[0];
+      const topPrice = topPick.discount_price || (topPick as any).price || (topPick.original_price && topPick.discount_pct ? Math.round(topPick.original_price * (1 - topPick.discount_pct / 100)) : 0);
+      const savings = (topPick.original_price || topPrice) - topPrice;
+
+      const reply =
+        language === 'roman_urdu'
+          ? `Zabardast! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein mujhe yeh ${affordableDeals.length} live verified deals mili hain. Sab se behtareen pick ${(topPick as any).brand?.name || 'Brand'} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (aur Rs. ${savings.toLocaleString()} ki bachat ho rahi hai!). Neechay diye gaye deal cards par tap karein:`
+          : `Great news! Within your budget of Rs. ${maxBudget.toLocaleString()}, I found ${affordableDeals.length} active verified deals. Top recommendation is "${topPick.title}" from ${(topPick as any).brand?.name || 'Brand'} at Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Tap any card below:`;
+
+      return { reply, deals: affordableDeals.slice(0, 5), is_off_topic: false, language };
+    }
+  }
+
+  // 2. Discount Percentage Query
+  const pctMatch = lower.match(/(\d{1,2})\s*%/);
+  if (pctMatch) {
+    const requestedPct = parseInt(pctMatch[1], 10);
+    const highDiscountDeals = liveDeals.filter((d) => (d.discount_pct || 0) >= requestedPct);
+
+    if (highDiscountDeals.length > 0) {
+      const reply =
+        language === 'roman_urdu'
+          ? `Mujhe aapke liye ${requestedPct}% ya is se zyada discount wali ${highDiscountDeals.length} active verified deals mili hain! Kisi bhi deal par tap kar ke verify karein aur brand ki website se direct claim karein:`
+          : `I found ${highDiscountDeals.length} active verified deals offering ${requestedPct}% or more discount! Tap any deal below to claim directly:`;
+      return { reply, deals: highDiscountDeals.slice(0, 5), is_off_topic: false, language };
+    }
+  }
+
+  // 3. Category or Keyword matching
+  let filtered = liveDeals.filter((d) => {
+    const title = (d.title || '').toLowerCase();
+    const desc = (d.description || '').toLowerCase();
+    const bName = ((d as any).brand?.name || '').toLowerCase();
+    const catName = ((d as any).category?.name || '').toLowerCase();
+
+    if (/kapr|lawn|kurti|dress|suit|shirt|pant|fashion|cloth/i.test(lower)) {
+      return catName.includes('fashion') || /lawn|kurti|suit|unstitched|khaadi|outfitters|gul ahmed/i.test(title);
+    }
+    if (/shoe|joot|sneaker|chappal|sandal|boot|footwear/i.test(lower)) {
+      return catName.includes('footwear') || /shoe|sneaker|bata|sandal|chappal/i.test(title);
+    }
+    if (/food|burger|pizza|khana|biryani|dine|restaurant|deal/i.test(lower)) {
+      return catName.includes('food') || /pizza|burger|cheezious|meal|combo/i.test(title);
+    }
+    if (/mobile|phone|laptop|electronics|tech|watch|gadget/i.test(lower)) {
+      return catName.includes('electronics') || /phone|mobile|redmi|priceoye|earbud/i.test(title);
+    }
+    if (/beauty|makeup|skin|perfume|cosmetic/i.test(lower)) {
+      return catName.includes('beauty') || /rose water|skincare|saeed ghani|cream/i.test(title);
+    }
+
+    return (
+      title.includes(lower) ||
+      desc.includes(lower) ||
+      bName.includes(lower) ||
+      catName.includes(lower)
+    );
+  });
+
+  if (filtered.length === 0) {
+    filtered = liveDeals.slice(0, 4);
+  }
+
+  const reply =
+    language === 'roman_urdu'
+      ? `Jumble Sale database se mujhe aapki search ke mutabiq yeh ${filtered.length} live verified deals mili hain! Neechay cards par tap karein:`
+      : `Here are the top ${filtered.length} active verified deals matching your search on Jumble Sale! Tap any card below:`;
+
+  return { reply, deals: filtered.slice(0, 5), is_off_topic: false, language };
+}
+
+export async function askJumbleBachatAssistant(
+  userQuery: string,
+  chatHistory: { role: string; content: string }[] = []
+): Promise<AssistantResponse> {
+  const query = (userQuery || '').trim();
+  const lower = query.toLowerCase();
+
+  // 1. Fetch REAL active live deals directly from database
+  const liveDeals = await getLiveDatabaseDealsForAI();
+
+  // Detect language
+  const urduMarkers = [
+    'pe', 'par', 'sasti', 'sasta', 'dikhao', 'batao', 'chahye', 'hai', 'hain',
+    'wali', 'walay', 'mein', 'kapron', 'jootay', 'khana', 'mujhe', 'karo',
+    'choot', 'bachat', 'dhamaka', 'aadhi', 'qimat', 'kya', 'le', 'sakta', 'meri',
+    'kese', 'kaise', 'bhi', 'kuch', 'kitna'
+  ];
+  const isRomanUrdu = urduMarkers.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(lower));
+  const language: 'roman_urdu' | 'english' = isRomanUrdu ? 'roman_urdu' : 'english';
+
+  // 2. Strict Off-Topic Guard
+  const offTopicPatterns = [
+    /\bcricket\b/i, /\bmatch\b/i, /\bpolitics\b/i, /\bsiasat\b/i, /\bprime minister\b/i,
+    /\bweather\b/i, /\bmausam\b/i, /\bpython\b/i, /\bjavascript\b/i, /\bcoding\b/i,
+    /\bcode\b/i, /\bhomework\b/i, /\bessay\b/i, /\bmovie\b/i, /\bfilm\b/i, /\bsong\b/i,
+    /\blatifa\b/i, /\bjoke\b/i, /\bcapital of\b/i, /\bpresident\b/i, /\bmath problem\b/i
+  ];
+  const isStrictlyOffTopic = offTopicPatterns.some((rgx) => rgx.test(lower));
+
+  if (isStrictlyOffTopic) {
+    const refusal =
+      language === 'roman_urdu'
+        ? 'Main sirf Jumble Sale par live verified deals, discounts aur shopping bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par sasti deal dhoondhni hai?'
+        : 'I am your Jumble Sale shopping deals assistant! I exclusively help you discover genuine sales, discounts, and brand savings across Pakistan. What product or brand deal can I help you find today?';
+    return {
+      reply: refusal,
+      deals: [],
+      is_off_topic: true,
+      language,
+    };
+  }
+
+  // 3. Compact Catalog format for Gemini context
+  const catalogContext = liveDeals
+    .map((d, idx) => {
+      const brandName = (d as any).brand?.name || (d as any).brand_name || 'Brand';
+      const catName = (d as any).category?.name || 'Retail';
+      const discPrice =
+        d.discount_price ||
+        (d as any).price ||
+        (d.original_price && d.discount_pct
+          ? Math.round(d.original_price * (1 - d.discount_pct / 100))
+          : null);
+      const origPrice = d.original_price ? `Rs. ${d.original_price.toLocaleString()}` : 'N/A';
+      const finalPrice = discPrice ? `Rs. ${discPrice.toLocaleString()}` : origPrice;
+      return `[${idx + 1}] ID: "${d.id}" | Brand: "${brandName}" | Title: "${d.title}" | Category: "${catName}" | Discount: ${d.discount_pct || 0}% OFF | Price: ${finalPrice} (Orig: ${origPrice}) | City: "${d.city || 'All Pakistan'}"`;
+    })
+    .join('\n');
+
+  const apiKey = await getEffectiveGeminiKey();
+
+  // 4. If Gemini API Key is available, prompt Gemini 1.5 Flash with the Live Deals Context
+  if (apiKey) {
+    try {
+      const systemPrompt = `You are "Jumble Bachat Assistant", the official AI shopping & deals concierge for the Jumble Sale platform in Pakistan.
+
+STRICT INSTRUCTIONS:
+1. PLATFORM GROUNDING: Below is the list of REAL LIVE DEALS currently available in the Jumble Sale database. You MUST ONLY recommend and cite deals from this list. DO NOT hallucinate or invent fake deals or fake brands.
+2. SCOPE: ONLY answer questions about shopping, sales, promotions, product pricing, budget management, discount vouchers, and retail stores in Pakistan on Jumble Sale.
+3. OFF-TOPIC REJECTION: If the user asks about ANYTHING outside shopping/sales (such as cricket, politics, weather, school homework, coding, general trivia), politely refuse:
+   "Main sirf Jumble Sale par live deals, discounts aur shopping bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par sasti deal dhoondhni hai?"
+4. BUDGET ASSISTANCE: If user mentions a budget (e.g. "Rs. 5000 budget hai"), inspect the prices of live deals, suggest which items they can buy together within that budget, and calculate their total savings!
+5. TONE & LANGUAGE: Reply warmly and politely in conversational ${language === 'roman_urdu' ? 'Pakistani Roman Urdu' : 'English'}. Be helpful, concise, and enthusiastic about savings!
+6. MATCHED DEALS: In the JSON, provide the array "matched_deal_ids" containing the exact string IDs of the relevant live deals from the catalog below so the app can display clickable cards for the user!
+
+LIVE DEALS CATALOG FROM DATABASE:
+${catalogContext || 'No deals currently active.'}
+
+OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
+{
+  "reply": "Your conversational response explaining the deals, savings, or answers to the user...",
+  "matched_deal_ids": ["deal-id-1", "deal-id-2"],
+  "is_off_topic": false
+}`;
+
+      const historyFormatted = chatHistory.slice(-4).map((h) => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }],
+      }));
+
+      const contents = [
+        ...historyFormatted,
+        {
+          role: 'user',
+          parts: [{ text: query }],
+        },
+      ];
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents,
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.4,
+              maxOutputTokens: 600,
+            },
+          }),
+        }
+      );
+
+      if (res.ok) {
+        const json = await res.json();
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const parsed = JSON.parse(text);
+          const matchedIds: string[] = Array.isArray(parsed.matched_deal_ids)
+            ? parsed.matched_deal_ids
+            : [];
+          const matchedDeals = liveDeals.filter((d) => matchedIds.includes(d.id));
+
+          return {
+            reply: parsed.reply || 'Yeh rahein aap ke liye behtareen deals:',
+            deals:
+              matchedDeals.length > 0
+                ? matchedDeals
+                : parsed.is_off_topic
+                ? []
+                : liveDeals.slice(0, 3),
+            is_off_topic: Boolean(parsed.is_off_topic),
+            language,
+          };
+        }
+      }
+    } catch (apiErr) {
+      console.warn('[Jumble Assistant] Gemini live call notice:', apiErr);
+    }
+  }
+
+  // 5. Intelligent Deterministic Heuristic Matcher using REAL LIVE DATABASE DEALS
+  return runDeterministicBachatSearch(query, liveDeals, language);
+}
+
+// ==============================================================================
+// 4. BHAI - BRAND MARKETING & RETAIL GROWTH COPILOT
+// ==============================================================================
+
+export interface BhaiResponse {
+  reply: string;
+  hasPostAction: boolean;
+}
+
+export function runDeterministicBhaiReply(prompt: string, brandName: string): BhaiResponse {
+  const p = prompt.toLowerCase();
+
+  // Greetings
+  if (p.includes('salam') || p.includes('hello') || p.includes('hi') || p.includes('kese ho') || p.includes('kaise ho')) {
+    return {
+      reply: `Walaikum Assalam! Main bilkul theek hoon, Bhai. Aap batayein, aaj Jumble Sale par aapke brand **${brandName}** ke liye kaunsi deal tayyar karni hai? Koi viral title, description ya pricing calculate karni hai?`,
+      hasPostAction: false,
+    };
+  }
+
+  // Intro / Identity
+  if (p.includes('naam') || p.includes('who are you') || p.includes('kon ho') || p.includes('intro') || p.includes('apne baray') || p.includes('kya kar sakte')) {
+    return {
+      reply: `Mera naam **Bhai** hai! 👋 Main **Jumble Sale** ka official AI Brand Copilot hoon.
+
+Main aapke brand **${brandName}** ki growth ke liye yeh kaam kar sakta hoon:
+1. 🏷️ **Catchy & Viral Titles**: 3 angles ke sath headings (Flash Urgency, Mass Value, Luxury).
+2. 📝 **Compelling Descriptions**: Fabric quality, warranty aur nationwide delivery highlight karne wali sales descriptions.
+3. 💰 **Smart Pricing & Margin Math**: Discount ke baad final price, customer savings aur psychological charm price (jaise Rs. 2,999) calculate karna.
+4. 📢 **Social & WhatsApp Copy**: Ready-to-copy WhatsApp broadcast messages aur Instagram captions with trending hashtags.
+5. 📜 **Retail Policies**: Exchange rules aur terms draft karna.
+
+Bataiye, aaj Jumble Sale par kaunsi deal ya post optimize karni hai?`,
+      hasPostAction: false,
+    };
+  }
+
+  // Strict Off-Topic
+  const offTopicKeywords = [
+    'weather', 'mausam', 'cricket', 'match', 'politics', 'siasat', 'prime minister',
+    'movie', 'film', 'song', 'gaana', 'joke', 'latifa', 'homework', 'essay',
+    'python', 'javascript', 'coding', 'science', 'math', 'capital of', 'president'
+  ];
+  if (offTopicKeywords.some((word) => p.includes(word))) {
+    return {
+      reply: `Bhai, main sirf **Jumble Sale** aur aapke brand business ke liye kaam karta hoon! 🚫 Fazool ya ghair-mutalliq baaton ke bajaye aain apni kisi deal ka title, description, discount price ya terms & conditions set karein.`,
+      hasPostAction: false,
+    };
+  }
+
+  // Pricing Query
+  const priceMatch = p.match(/\b(\d{3,6})\b/);
+  const pctMatch = p.match(/\b(\d{1,2})\s*%/);
+  if ((p.includes('price') || p.includes('discount') || p.includes('qimat') || p.includes('calculate') || p.includes('bachat')) && priceMatch) {
+    const origPrice = parseInt(priceMatch[1], 10);
+    const discountPct = pctMatch ? parseInt(pctMatch[1], 10) : 30;
+    const sellingPrice = Math.round(origPrice * (1 - discountPct / 100));
+    const savings = origPrice - sellingPrice;
+    const charmPrice = sellingPrice >= 1000 ? Math.floor(sellingPrice / 100) * 100 - 1 : sellingPrice - 1;
+
+    return {
+      reply: `💰 **Smart Pricing & Discount Analysis by Bhai**
+
+• **Original Price:** Rs. ${origPrice.toLocaleString()}
+• **Discount Rate:** ${discountPct}% OFF
+• **Final Selling Price:** Rs. ${sellingPrice.toLocaleString()}
+• **Customer Savings:** Rs. ${savings.toLocaleString()}
+
+✨ **Psychological Charm Price Recommendation:**
+👉 **Rs. ${charmPrice.toLocaleString()}**
+*(Bhai ka mashwara: .999 wali pricing impulse purchases ko 14% tak barha deti hai!)*
+
+💡 **Margin & Volume Advice:**
+${
+  discountPct <= 20
+    ? 'Yeh discount profit margins ko mehfooz rakhta hai aur high-end luxury items ke liye best hai.'
+    : discountPct <= 40
+    ? 'Yeh Pakistani e-commerce ka "sweet spot" hai jisme sab se zyada sales convert hoti hain!'
+    : 'Clearance aur bulk inventory move karne ke liye zabardast deal hai!'
+}`,
+      hasPostAction: true,
+    };
+  }
+
+  // Titles
+  if (p.includes('title') || p.includes('slogan') || p.includes('heading')) {
+    return {
+      reply: `🏷️ **Bhai ke Top 3 Recommended Titles (${brandName}):**
+
+1. ⚡ **Flash Sale / Urgent:**
+"Aakhri Mauqa: ${brandName} ki Exclusive Sale par Flat 35% Off!"
+
+2. 🔥 **Viral / Click-Magnet:**
+"Bachat Mela: Premium Collection ab Sirf Rs. 2,999 mein — Limited Stock!"
+
+3. ✨ **Luxury / Signature:**
+"${brandName} Signature Style: Unmatched Quality with Special Promotional Savings"
+
+Aap in mein se koi bhi title direct apni Jumble Sale post mein laga sakte hain!`,
+      hasPostAction: true,
+    };
+  }
+
+  // WhatsApp Broadcast
+  if (p.includes('whatsapp') || p.includes('broadcast') || p.includes('sms')) {
+    return {
+      reply: `📱 **Ready-to-Copy WhatsApp Broadcast Blast by Bhai:**
+
+Assalam-o-Alaikum! 🌟
+*Special Flash Sale Alert from ${brandName}!* 🔥
+
+Hum le kar aaye hain aap ke liye mahinay ki sab se barri bachat offer!
+🛍️ **Flat 35% OFF** on entire new collection!
+⏰ *Limited Time Only* — Stock tezi se khatam ho raha hai.
+
+Order karne ke liye abhi link par click karein:
+👉 [Jumble Sale Deal Link]
+
+Free Home Delivery available across Pakistan! 🇵🇰`,
+      hasPostAction: true,
+    };
+  }
+
+  // Instagram Caption
+  if (p.includes('insta') || p.includes('instagram') || p.includes('caption') || p.includes('hashtag')) {
+    return {
+      reply: `📸 **Instagram & TikTok Viral Caption by Bhai:**
+
+Style that speaks, prices that please! ✨
+Elevate your everyday look with ${brandName}'s signature range, now at an unbelievable discount exclusively on @JumbleSale.pk.
+
+👉 Tap the link in bio to claim your voucher before stocks run out!
+🚚 Nationwide Cash on Delivery available.
+
+#JumbleSale #PakistanFashion #${brandName.replace(/\s+/g, '')} #SaleAlert #LawnSale #PakistaniBrands #BachatMela #DiscountPakistan`,
+      hasPostAction: true,
+    };
+  }
+
+  // General Brand Strategy fallback
+  return {
+    reply: `💼 **Bhai's Marketing Recommendation for ${brandName}:**
+
+Aapke brand ke liye Jumble Sale par sab se behtareen tareeqa yeh hai ke:
+1. **Attractive Title**: 30% ya 40% discount ko title ke shuru mein highlight karein.
+2. **High-Res Photos**: Kam az kam 2 se 3 authentic product angles upload karein.
+3. **Clear Expiry Date**: "Limited 48 Hours" ka tag customer ko foran khareedne par aamadah karta hai.
+
+Bataiye, kya main aapke liye is promotion ka title, description ya pricing tayyar karoon?`,
+    hasPostAction: true,
+  };
+}
+
+export async function askBhaiBrandCopilot(
+  prompt: string,
+  brandName: string,
+  brandCategory: string = 'Retail'
+): Promise<BhaiResponse> {
+  const p = (prompt || '').trim();
+  const lower = p.toLowerCase();
+
+  // Fetch live market deals from database so Bhai knows current platform trends
+  const liveDeals = await getLiveDatabaseDealsForAI();
+  const brandOwnDeals = liveDeals.filter(
+    (d) =>
+      ((d as any).brand?.name || '').toLowerCase() === brandName.toLowerCase() ||
+      ((d as any).brand_name || '').toLowerCase() === brandName.toLowerCase()
+  );
+
+  const marketSummary = liveDeals
+    .slice(0, 6)
+    .map(
+      (d) =>
+        `• ${(d as any).brand?.name || 'Brand'}: "${d.title}" (${d.discount_pct}% OFF - Rs. ${d.discount_price || (d as any).price || 'Sale'})`
+    )
+    .join('\n');
+
+  const ownDealsSummary =
+    brandOwnDeals.length > 0
+      ? brandOwnDeals.map((d) => `• "${d.title}" (${d.discount_pct}% OFF - ${d.status})`).join('\n')
+      : 'No active deals posted yet.';
+
+  const apiKey = await getEffectiveGeminiKey();
+
+  if (apiKey) {
+    try {
+      const systemPrompt = `You are "Bhai", the official AI Brand Marketing Copilot & Retail Growth Strategist for Jumble Sale Pakistan.
+
+STRICT BEHAVIORAL RULES:
+1. NAME: Your name is strictly "Bhai". Always introduce yourself as "Bhai - Jumble Sale AI Copilot".
+2. TARGET AUDIENCE: You are talking to the brand owner/manager of "${brandName}" (Category: "${brandCategory}").
+3. ROLE & PURPOSE: Help this brand create viral, high-converting promotions, calculate discount pricing & profit margins, write WhatsApp broadcast copy, and craft Instagram captions with hashtags.
+4. STRICT SCOPE ENFORCEMENT: ONLY answer questions about Jumble Sale, brand marketing, pricing math, customer psychology, retail terms, and promotional copy.
+   IF the user asks about ANYTHING ELSE (cricket, politics, weather, coding, school homework, general banter):
+   Politely refuse and redirect:
+   "Bhai, main sirf Jumble Sale aur aapke brand business ke liye kaam karta hoon! 💼 Aayein apni kisi promotion ka title, discount rate, ya description set karein."
+5. MARKET INTELLIGENCE: You are aware of current live sales on Jumble Sale:
+${marketSummary}
+Your brand's current deals:
+${ownDealsSummary}
+
+6. TONE & LANGUAGE: Speak respectfully in Pakistani Roman Urdu (or English if addressed in English). Friendly, punchy, strategic, and business-focused!`;
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: `${systemPrompt}\n\nBrand User Message: "${p}"\n\nGenerate direct response as Bhai:` }],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.6,
+              maxOutputTokens: 700,
+            },
+          }),
+        }
+      );
+
+      if (res.ok) {
+        const json = await res.json();
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text && text.trim()) {
+          return {
+            reply: text.trim(),
+            hasPostAction: /title|discount|description|deal/i.test(lower),
+          };
+        }
+      }
+    } catch (apiErr) {
+      console.warn('[Bhai Copilot] Gemini API call notice:', apiErr);
+    }
+  }
+
+  // Local Bhai engine
+  return runDeterministicBhaiReply(p, brandName);
+}
 
 // ==============================================================================
 // 2. FEATURE 1: GEMINI NATURAL LANGUAGE DEAL SEARCH (ENGLISH & ROMAN URDU)

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { useToast } from '@/components/ui/Toast';
+import { askBhaiBrandCopilot } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { onBrandAgentTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
@@ -386,7 +387,7 @@ Valid till stock lasts • 7-day exchange with original invoice.
     };
   };
 
-  // Handle Send Message with Gemini -> Supabase Edge Function -> Local Fallback
+  // Handle Send Message with Live Database Context -> Gemini -> Fallback
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
     if (!text || isTyping) return;
@@ -404,45 +405,19 @@ Valid till stock lasts • 7-day exchange with original invoice.
     setIsTyping(true);
 
     try {
-      let finalReply: string | null = null;
-      let hasAction = false;
-
-      // 1. Direct Gemini Call if client has EXPO_PUBLIC_GEMINI_API_KEY
-      finalReply = await callGeminiDirect(text, brandDisplayName);
-
-      // 2. If not, invoke Supabase Edge Function (configured with Gemini secret)
-      if (!finalReply) {
-        try {
-          const { data: fnData, error: fnError } = await supabase.functions.invoke(
-            'brand-copilot',
-            {
-              body: { message: text, brand_name: brandDisplayName },
-            }
-          );
-          if (!fnError && fnData?.reply) {
-            finalReply = fnData.reply;
-          }
-        } catch (edgeErr) {
-          console.warn('[Brand Agent] Edge function unavailable, using local Bhai engine:', edgeErr);
-        }
-      }
-
-      // 3. Deterministic Local Fallback Engine (strictly same persona & rules)
-      if (!finalReply) {
-        const local = generateAIResponse(text);
-        finalReply = local.reply;
-        hasAction = local.hasPostAction;
-      } else {
-        const lower = text.toLowerCase();
-        hasAction = lower.includes('title') || lower.includes('price') || lower.includes('desc');
-      }
+      // Call Bhai Copilot with live deals context & Gemini
+      const aiResult = await askBhaiBrandCopilot(
+        text,
+        brandDisplayName,
+        authBrand?.category || 'Retail'
+      );
 
       const aiMsg: ChatMessage = {
         id: getNextId('assistant'),
         sender: 'assistant',
-        text: finalReply,
+        text: aiResult.reply,
         timestamp: timeStr,
-        hasPostAction: hasAction,
+        hasPostAction: aiResult.hasPostAction,
       };
 
       setMessages((prev) => [...prev, aiMsg]);
@@ -558,13 +533,23 @@ Valid till stock lasts • 7-day exchange with original invoice.
                         </Pressable>
 
                         {item.hasPostAction && (
-                          <Pressable
-                            style={[styles.bubbleActionBtn, { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)' }]}
-                            onPress={() => router.push('/(brand)/posts')}
-                            hitSlop={6}>
-                            <Ionicons name="arrow-forward" size={13} color="#38BDF8" />
-                            <Text style={[styles.bubbleActionText, { color: '#38BDF8' }]}>Apply to Posts</Text>
-                          </Pressable>
+                          <>
+                            <Pressable
+                              style={[styles.bubbleActionBtn, { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)' }]}
+                              onPress={() => router.push('/(brand)/posts')}
+                              hitSlop={6}>
+                              <Ionicons name="eye-outline" size={13} color="#38BDF8" />
+                              <Text style={[styles.bubbleActionText, { color: '#38BDF8' }]}>View Posts</Text>
+                            </Pressable>
+
+                            <Pressable
+                              style={[styles.bubbleActionBtn, { backgroundColor: 'rgba(0, 255, 102, 0.15)', borderColor: 'rgba(0, 255, 102, 0.4)' }]}
+                              onPress={() => router.push('/(brand)/create-deal' as any)}
+                              hitSlop={6}>
+                              <Ionicons name="add-circle-outline" size={13} color="#00FF66" />
+                              <Text style={[styles.bubbleActionText, { color: '#00FF66' }]}>Create Deal</Text>
+                            </Pressable>
+                          </>
                         )}
                       </View>
                     )}

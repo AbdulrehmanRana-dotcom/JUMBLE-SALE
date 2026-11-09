@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 
 import { useToast } from '@/components/ui/Toast';
-import { searchDealsWithGemini } from '@/lib/gemini';
+import { askJumbleBachatAssistant } from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import type { Deal } from '@/types/database.types';
@@ -32,12 +32,12 @@ interface ChatItem {
 }
 
 const SUGGESTED_QUESTIONS = [
-  '🔥 50% se zyada discount wali deals',
-  '👗 Eid pe kapron par sasti sale dikhao',
-  '🍔 Food delivery aur restaurant deals',
+  '🔥 50%+ OFF wali live deals dikhao',
+  '👗 Eid Fashion aur Lawn par kya sale hai?',
+  '🍔 Food & restaurant deals dikhao',
   '📱 Sastay smartphones & electronics',
-  '👠 Shoes aur sneakers clearance',
-  '⏰ Deals ending this weekend',
+  '👟 Shoes aur sneakers clearance',
+  '💰 Rs. 5,000 ke budget mein kya mil sakta hai?',
 ];
 
 let messageCounter = 0;
@@ -67,7 +67,7 @@ export default function AIAssistantScreen() {
             id: 'welcome-guest',
             role: 'assistant',
             content:
-              'Assalam-o-Alaikum! I am your Jumble Sale shopping assistant. Ask me about active sales in Pakistan in English or Roman Urdu (e.g. "Eid pe kapron par sasti sale" or "50% off electronics"). What deals are you looking for?',
+              'Salam! 🛍️ Main hoon aapka Jumble Bachat Assistant. Pakistan bhar ki active sales, brands aur discounts dhoondhne ke liye mujh se kuch bhi poochhein (jaise "50% off deals", "Rs. 4,000 ke andar kapray", ya "Food offers")!',
             created_at: new Date().toISOString(),
           },
         ]);
@@ -118,7 +118,7 @@ export default function AIAssistantScreen() {
               id: 'welcome',
               role: 'assistant',
               content:
-                'Assalam-o-Alaikum! Welcome to Jumble AI Deals Assistant. I can help you find real active sales across Pakistan in English and Roman Urdu! Ask me anything like:\n• "Eid pe kapron par sasti sale dikhao"\n• "Deals with 50% or more discount"\n• "Best offers on sneakers and shoes"',
+                'Salam! 🛍️ Main hoon aapka Jumble Bachat Assistant. Pakistan bhar ki active sales, brands aur discounts dhoondhne ke liye mujh se kuch bhi poochhein (jaise "50% off deals", "Rs. 4,000 ke andar kapray", ya "Food offers")!',
               created_at: new Date().toISOString(),
             },
           ]);
@@ -151,54 +151,44 @@ export default function AIAssistantScreen() {
     setLoading(true);
 
     try {
-      // 1. Try invoking the Edge Function chat-assistant
-      const { data: fnData, error: fnError } = await supabase.functions.invoke(
-        'chat-assistant',
-        {
-          body: { message: text },
-        }
-      );
+      const historySnapshot = messages.slice(-6).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-      if (!fnError && fnData?.success) {
-        const assistantMsg: ChatItem = {
-          id: getNextId('local-ai'),
-          role: 'assistant',
-          content: fnData.reply,
-          deals: fnData.deals || [],
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        return;
+      // Call Jumble Bachat Assistant with Live Database Grounding & Gemini
+      const aiResult = await askJumbleBachatAssistant(text, historySnapshot);
+
+      const assistantMsg: ChatItem = {
+        id: getNextId('local-ai'),
+        role: 'assistant',
+        content: aiResult.reply,
+        deals: aiResult.deals,
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+
+      // Record in Supabase chat_messages table if authenticated
+      if (user?.id) {
+        try {
+          await (supabase.from('chat_messages') as any).insert([
+            {
+              user_id: user.id,
+              role: 'user',
+              content: text,
+              created_at: userMsg.created_at,
+            },
+            {
+              user_id: user.id,
+              role: 'assistant',
+              content: aiResult.reply,
+              deal_ids: aiResult.deals.map((d: any) => d.id),
+              created_at: assistantMsg.created_at,
+            },
+          ]);
+        } catch {}
       }
-
-      // 2. Client-side fallback if Edge Function is offline or rate-limited
-      if (fnError && fnError.message?.includes('429')) {
-        toast.show('Rate limit reached. Please wait a minute before asking again.', 'error');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: getNextId('ai-ratelimit'),
-            role: 'assistant',
-            content: 'Aap bohat jaldi sawal bhej rahay hain! Kripya aik minute intizar karein.',
-            created_at: new Date().toISOString(),
-          },
-        ]);
-        return;
-      }
-
-      // 2. Gemini Natural Language Deal Search with live database matching
-      const aiResult = await searchDealsWithGemini(text);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: getNextId('ai-gemini'),
-          role: 'assistant',
-          content: aiResult.reply,
-          deals: aiResult.deals,
-          created_at: new Date().toISOString(),
-        },
-      ]);
     } catch (err: any) {
       toast.show(err.message || 'Chat error', 'error');
     } finally {
@@ -225,9 +215,9 @@ export default function AIAssistantScreen() {
               <Ionicons name="sparkles" size={18} color={colors.textInverse} />
             </View>
             <View>
-              <Text style={styles.headerTitle}>Jumble AI Deals Concierge</Text>
+              <Text style={styles.headerTitle}>Jumble AI Bachat Assistant</Text>
               <Text style={styles.headerSubtitle}>
-                English & Roman Urdu • Verified Deals Only
+                Live Database Connected • Verified Deals Only
               </Text>
             </View>
           </View>

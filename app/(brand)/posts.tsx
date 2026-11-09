@@ -405,6 +405,9 @@ export default function BrandPostsScreen() {
       setSelectionMode('none');
       queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
       queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-profile-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['featured-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
       refetch();
     },
     onError: (err: any) => {
@@ -412,8 +415,42 @@ export default function BrandPostsScreen() {
     },
   });
 
-  // Single Post Delete with Confirmation
+  // Single Post Delete with Confirmation (Safe for Web + Native)
   const handleDeleteSingle = (post: Deal) => {
+    const doDelete = async () => {
+      try {
+        await deleteLocalDeal(post.id);
+        try {
+          await supabase.from('deals').delete().eq('id', post.id);
+        } catch (dbErr) {
+          console.warn('[posts] Supabase delete warning:', dbErr);
+        }
+        toast.show('Post deleted from database! 🗑️', 'info');
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-profile-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['featured-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+        refetch();
+      } catch (err: any) {
+        toast.show(err.message || 'Failed to delete post', 'error');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') {
+        const confirmed = window.confirm(
+          `Are you sure you want to delete "${post.title}"? This will remove it from the database.`
+        );
+        if (confirmed) {
+          doDelete();
+        }
+      } else {
+        doDelete();
+      }
+      return;
+    }
+
     Alert.alert(
       'Delete Post',
       `Are you sure you want to delete "${post.title}"? This will remove it from the database.`,
@@ -422,22 +459,7 @@ export default function BrandPostsScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteLocalDeal(post.id);
-              try {
-                await supabase.from('deals').delete().eq('id', post.id);
-              } catch (dbErr) {
-                console.warn('[posts] Supabase delete warning:', dbErr);
-              }
-              toast.show('Post deleted from database! 🗑️', 'info');
-              queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
-              queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
-              refetch();
-            } catch (err: any) {
-              toast.show(err.message || 'Failed to delete post', 'error');
-            }
-          },
+          onPress: doDelete,
         },
       ]
     );

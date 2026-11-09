@@ -8,6 +8,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -31,6 +32,8 @@ import {
   saveBrandIdentityGlobally,
 } from '@/lib/brandStore';
 import {
+  deleteLocalDeal,
+  deduplicateDeals,
   duplicateDeal,
   extendDealExpiry,
   getDealRemainingDays,
@@ -226,9 +229,59 @@ export default function BrandProfileScreen() {
         refetchDeals();
         queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
         queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-profile-deals'] });
       }
     } catch {
       toast.show('Failed to clone promotion', 'error');
+    }
+  };
+
+  const handleDeleteDeal = async (deal: Deal) => {
+    const doDelete = async () => {
+      try {
+        await deleteLocalDeal(deal.id);
+        toast.show('Deal removed successfully! 🗑️', 'info');
+        refetchDeals();
+        queryClient.invalidateQueries({ queryKey: ['brand-profile-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+        queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['featured-deals'] });
+        queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+      } catch (err: any) {
+        toast.show(err.message || 'Failed to delete deal', 'error');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') {
+        const confirmed = window.confirm(`Delete promotion "${deal.title}"?`);
+        if (confirmed) {
+          await doDelete();
+        }
+      } else {
+        await doDelete();
+      }
+      return;
+    }
+
+    Alert.alert('Delete Promotion', `Delete "${deal.title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: doDelete },
+    ]);
+  };
+
+  const handleCleanDuplicates = async () => {
+    try {
+      await deduplicateDeals(activeBrandId);
+      toast.show('Duplicate promotions cleaned up! ✨', 'success');
+      refetchDeals();
+      queryClient.invalidateQueries({ queryKey: ['brand-profile-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals-posts'] });
+      queryClient.invalidateQueries({ queryKey: ['brand-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['featured-deals'] });
+      queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+    } catch {
+      toast.show('Could not clean duplicates', 'error');
     }
   };
 
@@ -616,6 +669,16 @@ export default function BrandProfileScreen() {
 
   // ─── SCREEN 2: RECENT DEALS (User Screenshot 2) ───
   if (activeView === 'recent-deals') {
+    const hasDuplicateTitles = (() => {
+      const titles = new Set<string>();
+      for (const d of deals) {
+        const clean = (d.title || '').trim().toLowerCase();
+        if (titles.has(clean)) return true;
+        titles.add(clean);
+      }
+      return false;
+    })();
+
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.topHeader}>
@@ -634,7 +697,16 @@ export default function BrandProfileScreen() {
             hitSlop={8}>
             <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
           </Pressable>
-          <Text style={styles.subHeaderTitle}>Recent Deals</Text>
+          <Text style={styles.subHeaderTitle}>Recent Deals ({deals.length})</Text>
+
+          {hasDuplicateTitles && (
+            <Pressable
+              style={styles.cleanDuplicatesBtn}
+              onPress={handleCleanDuplicates}>
+              <Ionicons name="sparkles" size={13} color="#090A0E" />
+              <Text style={styles.cleanDuplicatesText}>Clean Duplicates</Text>
+            </Pressable>
+          )}
         </View>
 
         <FlatList
@@ -651,26 +723,36 @@ export default function BrandProfileScreen() {
           renderItem={({ item }) => {
             const imgUri =
               item.image_urls?.[0] ||
+              item.banner_url ||
               'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80';
             const priceFormatted = item.discount_price
               ? `Rs. ${item.discount_price.toLocaleString()}`
               : (item.discount_pct ? `${item.discount_pct}% OFF` : 'Active Deal');
 
             return (
-              <Pressable
-                style={styles.recentDealItemCard}
-                onPress={() => setActiveView('posts')}>
-                <View style={styles.recentDealImageWrap}>
-                  <Image source={{ uri: imgUri }} style={styles.recentDealImg} />
-                </View>
+              <View style={styles.recentDealItemCard}>
+                <Pressable
+                  style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}
+                  onPress={() => setActiveView('posts')}>
+                  <View style={styles.recentDealImageWrap}>
+                    <Image source={{ uri: imgUri }} style={styles.recentDealImg} />
+                  </View>
 
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.recentDealTitle}>{item.title}</Text>
-                  <Text style={styles.recentDealPrice}>{priceFormatted}</Text>
-                </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.recentDealTitle}>{item.title}</Text>
+                    <Text style={styles.recentDealPrice}>{priceFormatted}</Text>
+                  </View>
+                </Pressable>
 
-                <Ionicons name="chevron-forward" size={18} color="#64748B" />
-              </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${item.title}`}
+                  style={styles.recentDealTrashBtn}
+                  hitSlop={8}
+                  onPress={() => handleDeleteDeal(item)}>
+                  <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                </Pressable>
+              </View>
             );
           }}
         />
@@ -777,7 +859,10 @@ export default function BrandProfileScreen() {
             {/* Recent Deals Option */}
             <Pressable
               style={styles.menuItem}
-              onPress={() => setActiveView('recent-deals')}>
+              onPress={() => {
+                refetchDeals();
+                setActiveView('recent-deals');
+              }}>
               <View style={styles.iconCircle}>
                 <Ionicons name="time" size={18} color="#00FF66" />
               </View>
@@ -1466,6 +1551,32 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#00FF66',
     marginTop: 2,
+  },
+  recentDealTrashBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+  },
+  cleanDuplicatesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#00FF66',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.full,
+    marginLeft: 'auto',
+  },
+  cleanDuplicatesText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#090A0E',
   },
   content: {
     paddingHorizontal: spacing[4],

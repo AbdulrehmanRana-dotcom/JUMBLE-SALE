@@ -438,6 +438,7 @@ export function getDealRemainingDays(deal: Partial<Deal> | null | undefined): nu
 let memoryDealsCache: Deal[] | null = null;
 let lastDealsCacheTime = 0;
 const DEALS_CACHE_TTL = 30 * 1000; // 30s fast RAM cache for 0ms tab switching
+export const DELETED_DEALS_KEY = '@jumble_sale_deleted_deal_ids';
 
 export async function getLocalBrandDeals(brandId?: string): Promise<Deal[]> {
   try {
@@ -446,9 +447,12 @@ export async function getLocalBrandDeals(brandId?: string): Promise<Deal[]> {
     }
 
     let deals: Deal[] = [];
+    const deletedRaw = await AsyncStorage.getItem(DELETED_DEALS_KEY);
+    const deletedIds: Set<string> = new Set(deletedRaw ? JSON.parse(deletedRaw) : []);
+
     const raw = await AsyncStorage.getItem(LOCAL_DEALS_KEY);
     if (!raw) {
-      deals = DEFAULT_SEED_DEALS;
+      deals = DEFAULT_SEED_DEALS.filter((s) => !deletedIds.has(s.id));
       AsyncStorage.setItem(LOCAL_DEALS_KEY, JSON.stringify(deals)).catch(() => {});
     } else {
       const parsed = JSON.parse(raw);
@@ -459,12 +463,14 @@ export async function getLocalBrandDeals(brandId?: string): Promise<Deal[]> {
         );
         const missingSeeds = DEFAULT_SEED_DEALS.filter(
           (s) =>
+            !deletedIds.has(s.id) &&
             !existingIds.has(s.id) &&
             !existingTitles.has((s.title || '').trim().toLowerCase())
         );
-        deals = [...parsed, ...missingSeeds];
+        // Exclude any deals previously recorded as deleted
+        deals = [...parsed.filter((d: Deal) => !deletedIds.has(d.id)), ...missingSeeds];
       } else {
-        deals = DEFAULT_SEED_DEALS;
+        deals = DEFAULT_SEED_DEALS.filter((s) => !deletedIds.has(s.id));
       }
     }
 
@@ -621,10 +627,65 @@ export async function saveLocalDeal(deal: Partial<Deal>): Promise<Deal> {
 }
 
 export async function deleteLocalDeal(dealId: string): Promise<void> {
+  // 1. Record in persistent deleted deals set
+  try {
+    const deletedRaw = await AsyncStorage.getItem(DELETED_DEALS_KEY);
+    const deletedList: string[] = deletedRaw ? JSON.parse(deletedRaw) : [];
+    if (!deletedList.includes(dealId)) {
+      deletedList.push(dealId);
+      await AsyncStorage.setItem(DELETED_DEALS_KEY, JSON.stringify(deletedList));
+    }
+  } catch (err) {
+    console.warn('[DealStore] Could not update deleted IDs list:', err);
+  }
+
+  // 2. Remove from active store
   const existing = await getLocalBrandDeals();
   const updated = existing.filter((d) => d.id !== dealId);
   memoryDealsCache = updated;
+  lastDealsCacheTime = Date.now();
   await AsyncStorage.setItem(LOCAL_DEALS_KEY, JSON.stringify(updated));
+
+  // 3. Remove from remote Supabase if connected
+  if (isSupabaseConfigured) {
+    try {
+      await (supabase.from('deals') as any).delete().eq('id', dealId);
+    } catch (err) {
+      console.warn('[DealStore] Supabase deleteLocalDeal notice:', err);
+    }
+  }
+}
+
+/**
+ * Removes duplicate deals that share the exact same title & brand, keeping only the single newest one.
+ */
+export async function deduplicateDeals(brandId?: string): Promise<Deal[]> {
+  const allDeals = await getLocalBrandDeals();
+  const seenKeys = new Set<string>();
+  const keepDeals: Deal[] = [];
+  const removedIds: string[] = [];
+
+  for (const d of allDeals) {
+    if (brandId && d.brand_id !== brandId) {
+      keepDeals.push(d);
+      continue;
+    }
+    const cleanTitle = (d.title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim().toLowerCase();
+    const key = `${d.brand_id || ''}_${cleanTitle}`;
+    if (seenKeys.has(key)) {
+      removedIds.push(d.id);
+    } else {
+      seenKeys.add(key);
+      keepDeals.push(d);
+    }
+  }
+
+  if (removedIds.length > 0) {
+    memoryDealsCache = keepDeals;
+    lastDealsCacheTime = Date.now();
+    await AsyncStorage.setItem(LOCAL_DEALS_KEY, JSON.stringify(keepDeals));
+  }
+  return brandId ? keepDeals.filter((d) => d.brand_id === brandId) : keepDeals;
 }
 
 /**

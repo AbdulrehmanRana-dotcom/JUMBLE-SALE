@@ -85,6 +85,11 @@ function RootLayoutNav() {
           if (!isBrandRoute || segList[1] !== 'rejected') {
             router.replace('/(brand)/rejected' as any);
           }
+        } else if (brandStatus === 'suspended') {
+          if (currentGroup !== 'suspended') {
+            router.replace('/suspended');
+          }
+          return;
         } else if (brandStatus === 'active' && brand?.is_verified === true) {
           if (
             !isBrandRoute ||

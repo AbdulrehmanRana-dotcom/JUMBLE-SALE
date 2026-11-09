@@ -295,11 +295,16 @@ export async function suspendBrand(
     } catch {}
   }
 
-  // 3. Suspend deals of this brand in Supabase
+  // 3. Suspend deals of this brand in Supabase and mark owner profile suspended
   try {
     await (supabase.from('deals') as any)
       .update({ status: 'suspended' })
       .eq('brand_id', brandId);
+
+    const { data: b } = await (supabase.from('brands') as any).select('owner_id').eq('id', brandId).maybeSingle();
+    if (b?.owner_id) {
+      await (supabase.from('profiles') as any).update({ is_active: false }).eq('id', b.owner_id);
+    }
   } catch {}
 
   // 4. Also attempt secure PostgreSQL RPC
@@ -355,11 +360,16 @@ export async function reactivateBrand(brandId: string, brandName: string) {
     } catch {}
   }
 
-  // 3. Reactivate deals of this brand in Supabase
+  // 3. Reactivate deals of this brand in Supabase and restore owner profile
   try {
     await (supabase.from('deals') as any)
       .update({ status: 'active' })
       .eq('brand_id', brandId);
+
+    const { data: b } = await (supabase.from('brands') as any).select('owner_id').eq('id', brandId).maybeSingle();
+    if (b?.owner_id) {
+      await (supabase.from('profiles') as any).update({ is_active: true }).eq('id', b.owner_id);
+    }
   } catch {}
 
   // 4. Also attempt secure PostgreSQL RPC

@@ -169,14 +169,12 @@ function runDeterministicBachatSearch(
 
   // 1. Strict Out-of-Syllabus Guard (Prioritized)
   const offTopicPatterns = [
-    /\bcricket\b/i, /\bmatch\b/i, /\bworld\s*cup\b/i, /\bscore\b/i,
-    /\bpolitics\b/i, /\bsiasat\b/i, /\bprime\s*minister\b/i, /\bpresident\b/i,
-    /\bweather\b/i, /\bmausam\b/i, /\bbarish\b/i, /\bbarsaat\b/i,
-    /\bpython\b/i, /\bjavascript\b/i, /\bcoding\b/i, /\bcode\b/i,
-    /\bhomework\b/i, /\bessay\b/i, /\bmovie\b/i, /\bfilm\b/i, /\bsong\b/i, /\bgaana\b/i,
-    /\blatifa\b/i, /\bjoke\b/i, /\bcapital\s*of\b/i, /\bmath\s*problem\b/i,
-    /\bscience\b/i, /\bphysics\b/i, /\bchemistry\b/i, /\bwho\s*is\b/i, /\bwho\s*won\b/i,
-    /\bwho\s*was\b/i, /\bwho\s*created\b/i, /\btell\s*me\s*a\s*story\b/i
+    // Sports, matches, players, games
+    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i,
+    // Casual Chit-Chat, Personal Queries, TV & Media
+    /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
+    // Politics, News, Weather, Coding & General Knowledge
+    /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
   ];
   if (offTopicPatterns.some((rgx) => rgx.test(lower))) {
     const refusal =
@@ -645,7 +643,22 @@ function runDeterministicBachatSearch(
     return { reply, deals: tokenMatches.slice(0, 5), is_off_topic: false, language };
   }
 
-  // Honest Salesman Fallback (when no specific item was found)
+  // Honest Salesman Fallback (when no specific item was found in database)
+  const shoppingIntentKeywords = /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|coupons|voucher|vouchers|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim)\b/i;
+  const hasShoppingIntent = shoppingIntentKeywords.test(lower);
+
+  if (!hasShoppingIntent) {
+    // If no deals matched and user didn't even mention shopping words, it is out of syllabus!
+    const refusal =
+      "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par discount dekhna hai?";
+    return {
+      reply: refusal,
+      deals: [],
+      is_off_topic: true,
+      language: 'roman_urdu',
+    };
+  }
+
   const topFallback = liveDeals.slice(0, 4);
   const fallbackReply =
     language === 'roman_urdu'
@@ -681,14 +694,12 @@ export async function askJumbleBachatAssistant(
 
   // 2. Strict Off-Topic Guard
   const offTopicPatterns = [
-    /\bcricket\b/i, /\bmatch\b/i, /\bworld\s*cup\b/i, /\bscore\b/i,
-    /\bpolitics\b/i, /\bsiasat\b/i, /\bprime\s*minister\b/i, /\bpresident\b/i,
-    /\bweather\b/i, /\bmausam\b/i, /\bbarish\b/i, /\bbarsaat\b/i,
-    /\bpython\b/i, /\bjavascript\b/i, /\bcoding\b/i, /\bcode\b/i,
-    /\bhomework\b/i, /\bessay\b/i, /\bmovie\b/i, /\bfilm\b/i, /\bsong\b/i, /\bgaana\b/i,
-    /\blatifa\b/i, /\bjoke\b/i, /\bcapital\s*of\b/i, /\bmath\s*problem\b/i,
-    /\bscience\b/i, /\bphysics\b/i, /\bchemistry\b/i, /\bwho\s*is\b/i, /\bwho\s*won\b/i,
-    /\bwho\s*was\b/i, /\bwho\s*created\b/i, /\btell\s*me\s*a\s*story\b/i
+    // Sports, matches, players, games
+    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i,
+    // Casual Chit-Chat, Personal Queries, TV & Media
+    /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
+    // Politics, News, Weather, Coding & General Knowledge
+    /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
   ];
   const isStrictlyOffTopic = offTopicPatterns.some((rgx) => rgx.test(lower));
 

@@ -16,7 +16,13 @@ import {
 } from 'react-native';
 
 import { useToast } from '@/components/ui/Toast';
-import { askBhaiBrandCopilot } from '@/lib/gemini';
+import {
+  askBhaiBrandCopilot,
+  getBrandLiveContext,
+  runDeterministicBhaiReply,
+  type BhaiAction,
+  type BrandLiveContext,
+} from '@/lib/gemini';
 import { supabase } from '@/lib/supabase';
 import { onBrandAgentTabReset } from '@/lib/tabEvents';
 import { useAuth } from '@/providers/AuthProvider';
@@ -28,40 +34,19 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   hasPostAction?: boolean;
+  actions?: BhaiAction[];
+  suggested_prompts?: string[];
 }
 
 const QUICK_PROMPTS = [
-  '👋 Bhai, aap kon ho aur meri kya help kar sakte ho?',
-  '💡 Summer Lawn Suit ka catchy title do',
-  '💰 Rs. 6,000 par 30% discount ka price set kro',
+  '📊 Mera store status aur kitni deals live hain?',
+  '💡 Summer Collection ka catchy title do',
+  '💰 Rs. 5,000 par 30% discount ka price calculate karo',
+  '⏳ Meri pending deal kab approve hogi?',
   '📝 Premium product description likho',
+  '📢 WhatsApp customer broadcast message likho',
   '📜 7-day exchange ke terms & conditions bnao',
-  '📢 Instagram caption aur viral hashtags do',
-  '💬 WhatsApp customer broadcast message likho',
 ];
-
-const SYSTEM_PROMPT = `
-You are "Bhai", the official AI Brand Marketing Copilot for the "Jumble Sale" platform in Pakistan.
-
-STRICT BEHAVIORAL RULES:
-1. NAME: Your name is strictly "Bhai". Whenever asked who you are, what your name is, or your identity ("aap kon ho", "naam kya hai", "who are you"), always proudly introduce yourself as "Bhai — Jumble Sale AI Copilot".
-2. APP & PURPOSE: You exclusively work for Jumble Sale (Pakistan's discounts & flash deals platform) to help brand owners, merchants, and retailers.
-3. INTRODUCTION & CAPABILITIES: When asked for your intro or what you can do ("apne baray mai batao", "intro do", "kya kar sakte ho", "meri help kese kar sakte ho"):
-   Explain clearly and warmly:
-   - Your name is Bhai, the official Brand Copilot for Jumble Sale.
-   - You help the brand with:
-     * 🏷️ Catchy & Viral Titles / Slogans (to get maximum clicks on Jumble Sale)
-     * 📝 High-Converting Product & Deal Descriptions (highlighting quality, discount, delivery)
-     * 💰 Smart Pricing & Discount Calculation (calculating selling price, customer savings, and psychological charm price like Rs. 2,999)
-     * 📜 Official Terms & Conditions (drafting exchange policies, voucher rules, outlet validity)
-     * 📢 Social Media & WhatsApp Marketing (Instagram/TikTok captions with hashtags, WhatsApp broadcast blast copy)
-4. GREETINGS: You can warmly and politely reply to normal greetings (Salam, Assalam o Alaikum, Hello, Hi, Kese ho, Kaise hain). Ask how you can help their brand today.
-5. STRICT SCOPE ENFORCEMENT & LIMITATIONS: You must ONLY answer questions directly related to Jumble Sale, brand deals, discounts, pricing, products, retail terms, and marketing.
-   DO NOT entertain off-topic, random, or useless questions (fazool baatein) such as: general knowledge, politics, cricket/sports, school homework/essays, code/programming, weather, personal gossip, etc.
-   If the user asks anything outside Jumble Sale and retail brand business, politely reject and steer them back:
-   "Bhai, main sirf Jumble Sale aur aapke brand business ke liye kaam karta hoon! 🚫 Fazool ya ghair-mutalliq baaton ke bajaye aain apni kisi deal ka title, description, discount price ya terms & conditions set karein."
-6. TONE & LANGUAGE: Speak respectfully in Pakistani Roman Urdu (or English if prompted in English). Friendly, professional, concise, and helpful.
-`;
 
 let messageCounter = 0;
 function getNextId(prefix: string) {
@@ -72,13 +57,30 @@ function getNextId(prefix: string) {
 export default function BrandAgentScreen() {
   const router = useRouter();
   const toast = useToast();
-  const { brand: authBrand, profile } = useAuth();
+  const { user, brand: authBrand, profile } = useAuth();
   const flatListRef = useRef<FlatList>(null);
 
   const brandDisplayName = authBrand?.name || profile?.display_name || 'My Brand';
 
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [liveContext, setLiveContext] = useState<BrandLiveContext | null>(null);
+
+  // Load Real-time Database Context on Mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const ctx = await getBrandLiveContext(authBrand?.id || brandDisplayName, user?.id);
+        if (isMounted) setLiveContext(ctx);
+      } catch (err) {
+        console.warn('[BrandAgentScreen] Context load note:', err);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [authBrand?.id, brandDisplayName, user?.id]);
 
   // Instagram-style: Tapping Agent in bottom nav clears draft and scrolls chat to end
   useEffect(() => {
@@ -86,7 +88,9 @@ export default function BrandAgentScreen() {
       setInputMessage('');
       flatListRef.current?.scrollToEnd({ animated: true });
     });
-    return unsubscribe;
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, []);
 
   // Initial welcome message from Bhai
@@ -94,17 +98,22 @@ export default function BrandAgentScreen() {
     {
       id: 'msg-welcome',
       sender: 'assistant',
-      text: `Salam! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Brand Copilot.
+      text: `Walaikum Assalam Janab! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Executive Brand Assistant.
 
-Main aapke brand **${brandDisplayName}** ke liye:
-• 🏷️ Catchy & Viral Titles
-• 📝 High-Converting Descriptions
-• 💰 Smart Pricing & Discount Calculation (.999 charm price)
-• 📜 Terms & Conditions
-• 📢 Instagram & WhatsApp Marketing Copy
+Main aapke brand **${brandDisplayName}** ke liye in ahem umoor mein hazir hoon:
+• 📊 Real-Time Store Status & Pending Reviews
+• 🏷️ Catchy & Viral Titles (Urgency, Value & Luxury)
+• 📝 High-Converting Product Descriptions
+• 💰 Smart Pricing & Psychological Charm Prices (.999)
+• 📜 Terms & Conditions aur QA verification rules
+• 📢 WhatsApp Broadcast & Instagram Captions
 
-Mujhse apni kisi bhi deal, item ya pricing ke mutalliq kuch bhi poochhein!`,
+Bataiye Janab, aaj kis maslay ya promotion mein aapki madad karoon?`,
       timestamp: 'Online',
+      actions: [
+        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+      ],
     },
   ]);
 
@@ -118,273 +127,6 @@ Mujhse apni kisi bhi deal, item ya pricing ke mutalliq kuch bhi poochhein!`,
       // fallback
     }
     toast.show('Message copied to clipboard! 📋', 'success');
-  };
-
-  // Direct Gemini API caller if client-side key is provided
-  const callGeminiDirect = async (userPrompt: string, brandName: string): Promise<string | null> => {
-    const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) return null;
-
-    try {
-      const fullPrompt = `${SYSTEM_PROMPT}
-
-Current Brand Name: "${brandName}".
-Brand User Message: "${userPrompt}".
-
-Generate response directly as Bhai following all rules strictly:`;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: fullPrompt }] }],
-            generationConfig: {
-              temperature: 0.6,
-              maxOutputTokens: 600,
-            },
-          }),
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim()) return text.trim();
-      }
-    } catch (err) {
-      console.warn('[Brand Agent] Direct Gemini API call failed:', err);
-    }
-    return null;
-  };
-
-  // High-precision local fallback engine strictly enforcing Bhai persona & Jumble Sale guardrails
-  const generateAIResponse = (userPrompt: string): { reply: string; hasPostAction: boolean } => {
-    const prompt = userPrompt.toLowerCase();
-
-    // 1. Identity & Name & Introduction Query
-    if (
-      prompt.includes('naam') ||
-      prompt.includes('who are you') ||
-      prompt.includes('kon ho') ||
-      prompt.includes('kaun ho') ||
-      prompt.includes('intro') ||
-      prompt.includes('apne baray') ||
-      prompt.includes('apne bare') ||
-      prompt.includes('kya kar sakte') ||
-      prompt.includes('kiya kar sakte') ||
-      prompt.includes('help') ||
-      prompt.includes('madad')
-    ) {
-      return {
-        reply: `Mera naam **Bhai** hai! 👋 Main **Jumble Sale** ka official AI Brand Copilot hoon.
-
-Main aapke brand **${brandDisplayName}** ki sales aur growth ke liye yeh kaam kar sakta hoon:
-1. 🏷️ **Catchy & Viral Titles**: High-converting headings aur slogans jo customers ko click karne par majboor karein.
-2. 📝 **Compelling Descriptions**: Fabric quality, warranty aur nationwide delivery highlight karne wali sales descriptions.
-3. 💰 **Smart Pricing & Discount Calculation**: Discount ke baad final price, customer savings aur psychological charm price (jaise Rs. 2,999) calculate karna.
-4. 📜 **Terms & Conditions**: 7-day exchange, invoice policies aur retail outlet rules draft karna.
-5. 📢 **Social & WhatsApp Copy**: Instagram captions with trending hashtags aur direct broadcast messages ready karna.
-
-Bataiye, aaj Jumble Sale par kaunsi deal ya post set karni hai?`,
-        hasPostAction: false,
-      };
-    }
-
-    // 2. Normal Greetings
-    if (
-      prompt.includes('salam') ||
-      prompt.includes('assalam') ||
-      prompt.includes('hello') ||
-      prompt.includes('hi') ||
-      prompt.includes('hey') ||
-      prompt.includes('kese ho') ||
-      prompt.includes('kaise ho') ||
-      prompt.includes('kya haal') ||
-      prompt.includes('kaise hain')
-    ) {
-      return {
-        reply: `Walaikum Assalam! Main bilkul theek hoon, Bhai. Aap batayein, aaj Jumble Sale par aapke brand **${brandDisplayName}** ke liye kaunsi deal tayyar karni hai? Koi title, description ya pricing calculate karni hai?`,
-        hasPostAction: false,
-      };
-    }
-
-    // 3. Strict Out-of-Scope / Fazool Baatein Rejection
-    const offTopicKeywords = [
-      'weather', 'mausam', 'cricket', 'match', 'politics', 'siasat', 'prime minister',
-      'movie', 'film', 'song', 'gaana', 'joke', 'latifa', 'homework', 'essay',
-      'python', 'javascript', 'coding', 'science', 'math', 'capital of', 'president'
-    ];
-    if (offTopicKeywords.some((word) => prompt.includes(word))) {
-      return {
-        reply: `Bhai, main sirf **Jumble Sale** aur aapke brand business ke liye kaam karta hoon! 🚫 Fazool ya ghair-mutalliq baaton ke bajaye aain apni kisi deal ka title, description, discount price ya terms & conditions set karein.`,
-        hasPostAction: false,
-      };
-    }
-
-    // 4. Price & Discount Calculation Query
-    const priceMatch = prompt.match(/\b(\d{3,6})\b/);
-    const pctMatch = prompt.match(/\b(\d{1,2})\s*%/);
-
-    if (
-      (prompt.includes('price') ||
-        prompt.includes('discount') ||
-        prompt.includes('qimat') ||
-        prompt.includes('calculate') ||
-        prompt.includes('bachat')) &&
-      priceMatch
-    ) {
-      const origPrice = parseInt(priceMatch[1], 10);
-      const discountPct = pctMatch ? parseInt(pctMatch[1], 10) : 30;
-      const sellingPrice = Math.round(origPrice * (1 - discountPct / 100));
-      const savings = origPrice - sellingPrice;
-      const charmPrice =
-        sellingPrice >= 1000
-          ? Math.floor(sellingPrice / 100) * 100 - 1
-          : sellingPrice - 1;
-
-      return {
-        reply: `💰 **Smart Pricing & Discount Analysis by Bhai**
-
-• **Original Price:** Rs. ${origPrice.toLocaleString()}
-• **Discount Rate:** ${discountPct}% OFF
-• **Final Selling Price:** Rs. ${sellingPrice.toLocaleString()}
-• **Customer Savings:** Rs. ${savings.toLocaleString()}
-
-✨ **Psychological Charm Price Recommendation:**
-👉 **Rs. ${charmPrice.toLocaleString()}**
-*(Bhai ka mashwara: .999 wali pricing impulse purchases ko 14% tak barha deti hai!)*
-
-💡 **Margin Advice:**
-${
-  discountPct <= 20
-    ? 'Yeh discount profit margins ko mehfooz rakhta hai aur high-end items ke liye best hai.'
-    : discountPct <= 40
-    ? 'Yeh Pakistani e-commerce ka "sweet spot" hai jisme sab se zyada orders aate hain!'
-    : 'Clearance aur bulk volume sales ke liye zabardast deal hai!'
-}`,
-        hasPostAction: true,
-      };
-    }
-
-    // 5. Titles & Slogans
-    if (
-      prompt.includes('title') ||
-      prompt.includes('slogan') ||
-      prompt.includes('naam') ||
-      prompt.includes('heading')
-    ) {
-      return {
-        reply: `🏷️ **Bhai ke Top 3 Recommended Titles (${brandDisplayName}):**
-
-1. ⚡ **Flash Sale / Urgent:**
-"Aakhri Mauqa: ${brandDisplayName} ki Exclusive Collection par Flat 30% Off!"
-
-2. 🔥 **Viral / Click-Magnet:**
-"Bachat Mela: Premium Items ab Sirf Rs. 2,999 mein — Limited Stock!"
-
-3. ✨ **Luxury / Signature:**
-"${brandDisplayName} Signature Style: Unmatched Quality with Special Savings"
-
-Aap in mein se koi bhi title direct apni Jumble Sale post mein laga sakte hain!`,
-        hasPostAction: true,
-      };
-    }
-
-    // 6. Terms & Conditions
-    if (
-      prompt.includes('term') ||
-      prompt.includes('condition') ||
-      prompt.includes('policy') ||
-      prompt.includes('rule') ||
-      prompt.includes('exchange') ||
-      prompt.includes('return')
-    ) {
-      return {
-        reply: `📜 **Official Terms & Conditions for ${brandDisplayName}:**
-
-1. Yeh promotional offer stock khatam honay tak valid hai.
-2. Discount online store aur tamam official retail outlets par laagu hai.
-3. 7 din ke andar exchange ki suhoolat asli invoice aur intact security tags ke sath dastyaab hai.
-4. Yeh deal kisi doosray promotional voucher ya bank discount ke sath combine nahi ki ja sakti.
-5. Standard nationwide cash-on-delivery aur delivery charges laagu honge.`,
-        hasPostAction: false,
-      };
-    }
-
-    // 7. Social Media, Instagram, WhatsApp Promotion
-    if (
-      prompt.includes('instagram') ||
-      prompt.includes('whatsapp') ||
-      prompt.includes('social') ||
-      prompt.includes('caption') ||
-      prompt.includes('promote') ||
-      prompt.includes('broadcast') ||
-      prompt.includes('ad')
-    ) {
-      return {
-        reply: `📢 **Promotional Marketing Assets by Bhai:**
-
-📸 **Instagram / TikTok Post Caption:**
-"🔥 BIGGEST SALE OF THE SEASON! 🔥
-
-Aapki pasandeeda collection par ab chal rahi hai FLAT 30% OFF ki Dhamaka Sale! 🎉
-
-Crafted for style, priced for unbeatable value. Limited stock nationwide!
-
-🛍️ Available in-store & online
-🚚 Express Doorstep Delivery Across Pakistan
-👉 Bio ke link par click karein aur apna order book karein!
-
-#JumbleSale #PakistanSale #SaleAlertPK #${brandDisplayName.replace(/[^a-zA-Z0-9]/g, '')} #BestDeals #OnlineShoppingPK"
-
----
-
-💬 **WhatsApp & SMS Broadcast Message:**
-"📢 Salam! ${brandDisplayName} ki taraf se shandaar khushkhabri! Hamari viral collection par ab Flat 30% OFF shuru ho chuki hai! Limited stock dastyaab hai, foran order karein: [Link]!"`,
-        hasPostAction: false,
-      };
-    }
-
-    // 8. Product Description
-    if (
-      prompt.includes('desc') ||
-      prompt.includes('tafseel') ||
-      prompt.includes('detail') ||
-      prompt.includes('likh') ||
-      prompt.includes('write')
-    ) {
-      return {
-        reply: `📝 **High-Converting Product Description by Bhai:**
-
-"${brandDisplayName} pesh karta hai aapke liye behtareen quality aur lajawab design. Yeh collection un khareedaron ke liye tayyar ki gayi hai jo premium fabric, aala mayaar aur munfarid style pasand karte hain. 
-
-Ab haasil karein flat discount ki zabardast bachat mehdood waqt ke liye! Pure Pakistan mein fast delivery, cash on delivery aur aasan exchange ki suhoolat ke sath dastyaab hai. Aaj hi shopping karein aur is shandaar offer ka faida uthayein!"`,
-        hasPostAction: true,
-      };
-    }
-
-    // 9. General Retail Campaign Request
-    return {
-      reply: `🚀 **Bhai's Marketing Recommendation for ${brandDisplayName}:**
-
-🏷️ **Recommended Title:**
-"Flash Clearance: Flat 30% Off on ${brandDisplayName} Specials!"
-
-📝 **Description:**
-"Experience signature elegance with ${brandDisplayName}. Premium materials, modern cut, and unmatched comfort delivered straight to your doorstep across Pakistan."
-
-💰 **Pricing Recommendation:**
-Rs. 4,999 ke bajaye **Rs. 3,499** charm price set karein. Customers ko Rs. 1,500 ki bachat dikhayen.
-
-📜 **Terms:**
-Valid till stock lasts • 7-day exchange with original invoice.
-
-📢 **Social Hook:**
-"Stock is flying off shelves! Claim your 30% discount today."`,
-      hasPostAction: true,
-    };
   };
 
   // Handle Send Message with Live Database Context -> Gemini -> Fallback
@@ -405,11 +147,16 @@ Valid till stock lasts • 7-day exchange with original invoice.
     setIsTyping(true);
 
     try {
-      // Call Bhai Copilot with live deals context & Gemini
+      // Refresh live context on demand to ensure zero staleness
+      const currentCtx =
+        liveContext || (await getBrandLiveContext(authBrand?.id || brandDisplayName, user?.id));
+
       const aiResult = await askBhaiBrandCopilot(
         text,
-        brandDisplayName,
-        authBrand?.category || 'Retail'
+        authBrand?.id || brandDisplayName,
+        authBrand?.category || 'Retail',
+        user?.id,
+        currentCtx
       );
 
       const aiMsg: ChatMessage = {
@@ -418,12 +165,17 @@ Valid till stock lasts • 7-day exchange with original invoice.
         text: aiResult.reply,
         timestamp: timeStr,
         hasPostAction: aiResult.hasPostAction,
+        actions: aiResult.actions,
+        suggested_prompts: aiResult.suggested_prompts,
       };
 
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err) {
       console.error('[Brand Agent] handleSend error:', err);
-      const fallback = generateAIResponse(text);
+      const fallback = runDeterministicBhaiReply(
+        text,
+        liveContext || brandDisplayName
+      );
       setMessages((prev) => [
         ...prev,
         {
@@ -432,6 +184,8 @@ Valid till stock lasts • 7-day exchange with original invoice.
           text: fallback.reply,
           timestamp: timeStr,
           hasPostAction: fallback.hasPostAction,
+          actions: fallback.actions,
+          suggested_prompts: fallback.suggested_prompts,
         },
       ]);
     } finally {
@@ -458,8 +212,8 @@ Valid till stock lasts • 7-day exchange with original invoice.
             <View style={styles.onlineDot} />
           </View>
           <View>
-            <Text style={styles.headerTitle}>Bhai — Brand Copilot</Text>
-            <Text style={styles.headerStatus}>Jumble Sale AI • Online</Text>
+            <Text style={styles.headerTitle}>Bhai — Executive Brand Copilot</Text>
+            <Text style={styles.headerStatus}>Jumble Sale AI • Live Database Connected</Text>
           </View>
         </View>
 
@@ -470,8 +224,12 @@ Valid till stock lasts • 7-day exchange with original invoice.
               {
                 id: getNextId('welcome-reset'),
                 sender: 'assistant',
-                text: `Salam! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Copilot. Nayi deal ya pricing ke mutalliq poochhein!`,
+                text: `Walaikum Assalam Janab! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Executive Assistant. Store status ya promotions ke mutalliq kuch bhi poochhein!`,
                 timestamp: 'Online',
+                actions: [
+                  { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+                  { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+                ],
               },
             ]);
             toast.show('Chat refreshed! 🔄', 'info');
@@ -479,6 +237,46 @@ Valid till stock lasts • 7-day exchange with original invoice.
           hitSlop={8}>
           <Ionicons name="refresh-outline" size={18} color="#94A3B8" />
         </Pressable>
+      </View>
+
+      {/* ─── REAL-TIME BRAND STATUS STRIP ─── */}
+      <View style={styles.snapshotStrip}>
+        <View style={styles.snapshotItem}>
+          <View style={[styles.statusDot, { backgroundColor: '#00FF66' }]} />
+          <Text style={styles.snapshotLabel}>
+            {liveContext ? `${liveContext.activeDeals.length} Live` : 'Active'}
+          </Text>
+        </View>
+
+        <View style={styles.snapshotDivider} />
+
+        <View style={styles.snapshotItem}>
+          <View style={[styles.statusDot, { backgroundColor: '#F59E0B' }]} />
+          <Text style={styles.snapshotLabel}>
+            {liveContext ? `${liveContext.pendingDeals.length} Pending` : 'Pending'}
+          </Text>
+        </View>
+
+        {liveContext && liveContext.rejectedDeals.length > 0 && (
+          <>
+            <View style={styles.snapshotDivider} />
+            <View style={styles.snapshotItem}>
+              <View style={[styles.statusDot, { backgroundColor: '#EF4444' }]} />
+              <Text style={[styles.snapshotLabel, { color: '#EF4444' }]}>
+                {liveContext.rejectedDeals.length} Rejected
+              </Text>
+            </View>
+          </>
+        )}
+
+        <View style={styles.snapshotDivider} />
+
+        <View style={styles.snapshotItem}>
+          <Ionicons name="storefront-outline" size={12} color="#38BDF8" style={{ marginRight: 4 }} />
+          <Text style={styles.snapshotLabelCategory} numberOfLines={1}>
+            {brandDisplayName}
+          </Text>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -519,6 +317,27 @@ Valid till stock lasts • 7-day exchange with original invoice.
                     {item.text}
                   </Text>
 
+                  {/* ─── ACTION BUTTONS / DEEP LINKS ─── */}
+                  {!isUser && item.actions && item.actions.length > 0 && (
+                    <View style={styles.actionsContainer}>
+                      {item.actions.map((act: BhaiAction, actIdx: number) => (
+                        <Pressable
+                          key={actIdx}
+                          style={styles.actionDeepLinkBtn}
+                          onPress={() => router.push(act.route as any)}
+                          hitSlop={6}>
+                          <Text style={styles.actionDeepLinkText}>{act.label}</Text>
+                          <Ionicons
+                            name="arrow-forward"
+                            size={12}
+                            color="#00FF66"
+                            style={{ marginLeft: 4 }}
+                          />
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+
                   <View style={styles.messageFooter}>
                     <Text style={styles.timestampText}>{item.timestamp}</Text>
 
@@ -531,26 +350,6 @@ Valid till stock lasts • 7-day exchange with original invoice.
                           <Ionicons name="copy-outline" size={13} color="#00FF66" />
                           <Text style={styles.bubbleActionText}>Copy</Text>
                         </Pressable>
-
-                        {item.hasPostAction && (
-                          <>
-                            <Pressable
-                              style={[styles.bubbleActionBtn, { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)' }]}
-                              onPress={() => router.push('/(brand)/posts')}
-                              hitSlop={6}>
-                              <Ionicons name="eye-outline" size={13} color="#38BDF8" />
-                              <Text style={[styles.bubbleActionText, { color: '#38BDF8' }]}>View Posts</Text>
-                            </Pressable>
-
-                            <Pressable
-                              style={[styles.bubbleActionBtn, { backgroundColor: 'rgba(0, 255, 102, 0.15)', borderColor: 'rgba(0, 255, 102, 0.4)' }]}
-                              onPress={() => router.push('/(brand)/create-deal' as any)}
-                              hitSlop={6}>
-                              <Ionicons name="add-circle-outline" size={13} color="#00FF66" />
-                              <Text style={[styles.bubbleActionText, { color: '#00FF66' }]}>Create Deal</Text>
-                            </Pressable>
-                          </>
-                        )}
                       </View>
                     )}
                   </View>
@@ -564,9 +363,14 @@ Valid till stock lasts • 7-day exchange with original invoice.
                 <View style={styles.botMiniAvatar}>
                   <Ionicons name="sparkles" size={12} color="#00FF66" />
                 </View>
-                <View style={[styles.messageBubble, styles.messageBubbleAssistant, styles.typingBubble]}>
+                <View
+                  style={[
+                    styles.messageBubble,
+                    styles.messageBubbleAssistant,
+                    styles.typingBubble,
+                  ]}>
                   <ActivityIndicator size="small" color="#00FF66" />
-                  <Text style={styles.typingText}>Copilot is writing...</Text>
+                  <Text style={styles.typingText}>Copilot is assisting...</Text>
                 </View>
               </View>
             ) : null
@@ -593,20 +397,20 @@ Valid till stock lasts • 7-day exchange with original invoice.
         {/* ─── INPUT COMPOSER ─── */}
         <View style={styles.inputComposer}>
           <TextInput
+            testID="brand-agent-input"
             style={styles.textInput}
-            placeholder="Type your question or request..."
+            placeholder="Type your question or request for Bhai..."
             placeholderTextColor="#64748B"
             value={inputMessage}
             onChangeText={setInputMessage}
-            multiline
+            returnKeyType="send"
+            onSubmitEditing={() => handleSend()}
             maxLength={600}
           />
 
           <Pressable
-            style={[
-              styles.sendBtn,
-              !inputMessage.trim() && styles.sendBtnDisabled,
-            ]}
+            testID="brand-agent-send-btn"
+            style={[styles.sendBtn, !inputMessage.trim() && styles.sendBtnDisabled]}
             disabled={!inputMessage.trim() || isTyping}
             onPress={() => handleSend()}>
             <Ionicons
@@ -685,6 +489,42 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#202432',
   },
+  snapshotStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111420',
+    paddingVertical: 7,
+    paddingHorizontal: spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1E2B',
+    gap: 8,
+  },
+  snapshotItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 5,
+  },
+  snapshotLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E2E8F0',
+  },
+  snapshotLabelCategory: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#38BDF8',
+    maxWidth: 140,
+  },
+  snapshotDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: '#202432',
+  },
   messagesList: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[3],
@@ -743,40 +583,59 @@ const styles = StyleSheet.create({
   messageTextAssistant: {
     color: '#E2E8F0',
   },
+  actionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#202432',
+  },
+  actionDeepLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 102, 0.35)',
+    borderRadius: radii.full,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  actionDeepLinkText: {
+    color: '#00FF66',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   messageFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 4,
-    paddingTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
   },
   timestampText: {
-    ...typography.caption,
     fontSize: 10,
     color: '#64748B',
   },
   bubbleActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   bubbleActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#0D1A12',
+    backgroundColor: '#1A1E2B',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 102, 0.3)',
+    borderColor: '#202432',
   },
   bubbleActionText: {
-    ...typography.caption,
-    fontSize: 10,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '600',
     color: '#00FF66',
   },
   typingBubble: {
@@ -784,17 +643,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   typingText: {
-    ...typography.caption,
-    color: '#94A3B8',
     fontSize: 12,
+    color: '#94A3B8',
+    fontStyle: 'italic',
   },
   quickPromptsWrap: {
+    paddingVertical: spacing[2],
     borderTopWidth: 1,
     borderTopColor: '#1A1E2B',
     backgroundColor: '#0D1018',
-    paddingVertical: spacing[2],
   },
   quickPromptsScroll: {
     paddingHorizontal: spacing[4],
@@ -805,48 +665,47 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#202432',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 7,
+    borderRadius: radii.full,
   },
   quickPromptText: {
-    ...typography.caption,
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '600',
+    color: '#CBD5E1',
+    fontSize: 12,
+    fontWeight: '500',
   },
   inputComposer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    backgroundColor: '#090A0E',
+    paddingVertical: spacing[3],
+    backgroundColor: '#0D1018',
     borderTopWidth: 1,
     borderTopColor: '#1A1E2B',
-    gap: spacing[2],
+    gap: 10,
   },
   textInput: {
     flex: 1,
+    minHeight: 40,
+    maxHeight: 100,
     backgroundColor: '#141721',
-    borderRadius: radii.xl,
-    paddingHorizontal: spacing[4],
-    paddingVertical: 10,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 10 : 8,
+    paddingBottom: Platform.OS === 'ios' ? 10 : 8,
+    color: '#FFFFFF',
+    fontSize: 13,
     borderWidth: 1,
     borderColor: '#202432',
-    color: '#FFFFFF',
-    fontSize: 14,
-    maxHeight: 100,
   },
   sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#00FF66',
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendBtnDisabled: {
-    backgroundColor: '#141721',
-    borderWidth: 1,
-    borderColor: '#202432',
+    backgroundColor: '#1A1E2B',
   },
 });

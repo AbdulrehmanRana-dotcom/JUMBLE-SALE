@@ -151,7 +151,104 @@ function runDeterministicBachatSearch(
     return { reply, deals: top3, is_off_topic: false, language };
   }
 
-  // 2. Budget Query
+  // 2. Specific Brand Name Mentions (Exact Brand Pitching)
+  const isKhaadi = /khaadi/i.test(lower);
+  const isOutfitters = /outfitter/i.test(lower);
+  const isGulAhmed = /gul\s*ahmed|gulahmed/i.test(lower);
+  const isBata = /bata/i.test(lower);
+  const isCheezious = /cheezious/i.test(lower);
+  const isPriceOye = /price\s*oye|priceoye/i.test(lower);
+  const isSaeedGhani = /saeed\s*ghani|saeedghani/i.test(lower);
+  const isImtiaz = /imtiaz/i.test(lower);
+  const isHabitt = /habitt/i.test(lower);
+
+  let brandMatches: Deal[] = [];
+  let brandPitchedName = '';
+
+  if (isKhaadi) {
+    brandPitchedName = 'Khaadi';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('khaadi') || title.includes('khaadi');
+    });
+  } else if (isOutfitters) {
+    brandPitchedName = 'Outfitters';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('outfitter') || title.includes('outfitter');
+    });
+  } else if (isGulAhmed) {
+    brandPitchedName = 'Gul Ahmed';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('gul') || bName.includes('ahmed') || title.includes('gul ahmed');
+    });
+  } else if (isBata) {
+    brandPitchedName = 'Bata Pakistan';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('bata') || title.includes('bata');
+    });
+  } else if (isCheezious) {
+    brandPitchedName = 'Cheezious';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('cheezious') || title.includes('cheezious');
+    });
+  } else if (isPriceOye) {
+    brandPitchedName = 'PriceOye';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('priceoye') || title.includes('priceoye');
+    });
+  } else if (isSaeedGhani) {
+    brandPitchedName = 'Saeed Ghani';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes('saeed') || bName.includes('ghani') || title.includes('saeed ghani');
+    });
+  } else if (isImtiaz) {
+    brandPitchedName = 'Imtiaz Super Market';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      return bName.includes('imtiaz');
+    });
+  } else if (isHabitt) {
+    brandPitchedName = 'Habitt';
+    brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      return bName.includes('habitt');
+    });
+  }
+
+  if (brandMatches.length > 0) {
+    const topDeal = brandMatches[0];
+    const origPrice = topDeal.original_price || 0;
+    const discPrice =
+      topDeal.discount_price ||
+      (origPrice && topDeal.discount_pct
+        ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
+        : origPrice);
+    const savings = origPrice > discPrice ? origPrice - discPrice : 0;
+    const savingsNote =
+      savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
+
+    const reply =
+      language === 'roman_urdu'
+        ? `Janab! ${brandPitchedName} par is waqt zabardast offers chal rahi hain! Sab se top deal "${topDeal.title}" par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Stock bohot tezi se nikal raha hai, yeh dekhein ${brandPitchedName} ki active verified deals:`
+        : `Great news Janab! ${brandPitchedName} currently has verified active sales with up to ${topDeal.discount_pct}% OFF${savingsNote}. Here are the top deals from ${brandPitchedName}:`;
+
+    return { reply, deals: brandMatches.slice(0, 5), is_off_topic: false, language };
+  }
+
+  // 3. Budget Query
   const budgetMatch =
     lower.match(/(?:budget|range|under|andar|tak|mein)\s*(?:rs\.?|pkr)?\s*(\d{3,6})/i) ||
     lower.match(/(?:rs\.?|pkr)?\s*(\d{3,6})\s*(?:budget|ke andar|tak)/i);
@@ -188,7 +285,7 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // 3. Sasta / Mehnga / Objection Handling
+  // 4. Sasta / Mehnga / Objection Handling
   const isCheapOrObjection = /sasta|kam budget|mehnga|discount zyada|chhoot|sasti|alternative/i.test(lower);
   if (isCheapOrObjection) {
     const sortedCheapest = [...liveDeals].sort((a, b) => {
@@ -208,7 +305,7 @@ function runDeterministicBachatSearch(
     return { reply, deals: topCheap, is_off_topic: false, language };
   }
 
-  // 4. Discount Percentage Query
+  // 5. Discount Percentage Query
   const pctMatch = lower.match(/(\d{1,2})\s*%/);
   if (pctMatch) {
     const requestedPct = parseInt(pctMatch[1], 10);
@@ -223,7 +320,7 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // 5. Category or Keyword matching
+  // 6. Category or Keyword matching
   let filtered = liveDeals.filter((d) => {
     const title = (d.title || '').toLowerCase();
     const desc = (d.description || '').toLowerCase();
@@ -236,7 +333,7 @@ function runDeterministicBachatSearch(
     if (/shoe|joot|sneaker|chappal|sandal|boot|footwear/i.test(lower)) {
       return catName.includes('footwear') || /shoe|sneaker|bata|sandal|chappal/i.test(title);
     }
-    if (/food|burger|pizza|khana|biryani|dine|restaurant|deal/i.test(lower)) {
+    if (/food|burger|pizza|khana|biryani|dine|restaurant|shawarma|karahi|roll/i.test(lower)) {
       return catName.includes('food') || /pizza|burger|cheezious|meal|combo/i.test(title);
     }
     if (/mobile|phone|laptop|electronics|tech|watch|gadget/i.test(lower)) {
@@ -246,24 +343,61 @@ function runDeterministicBachatSearch(
       return catName.includes('beauty') || /rose water|skincare|saeed ghani|cream/i.test(title);
     }
 
-    return (
-      title.includes(lower) ||
-      desc.includes(lower) ||
-      bName.includes(lower) ||
-      catName.includes(lower)
-    );
+    // Tokenized word matching
+    const words = lower.split(/\s+/).filter(w => w.length > 2 && !['ki', 'ka', 'ke', 'ko', 'se', 'deals', 'deal', 'sale', 'btana', 'batao', 'btao'].includes(w));
+    return words.some(w => title.includes(w) || desc.includes(w) || bName.includes(w) || catName.includes(w));
   });
 
   if (filtered.length === 0) {
     filtered = liveDeals.slice(0, 4);
   }
 
-  const reply =
-    language === 'roman_urdu'
-      ? `Aap ki talash ke mutabiq yeh sab se top verified deals hain jahan sab se bari bachat ho rahi hai! Kisi bhi deal par tap kar ke poori details check karein aur claim karein:`
-      : `Here are the top active verified deals matching your search with maximum savings! Tap any card to claim:`;
+  let categorySalesPitch = '';
+  if (/kapr|lawn|kurti|dress|suit|shirt|pant|fashion|cloth/i.test(lower)) {
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? 'Wah Janab! Kapron aur lawn collection par is waqt Jumble Sale par sab se bari bachat chal rahi hai! Khaadi, Outfitters aur Gul Ahmed par 30% se 50% tak flat discount mil raha hai. Yeh dekhein top verified fashion deals:'
+        : 'Superb choice Janab! We have massive sales on lawn, pret and apparel today with up to 50% OFF. Here are the top verified fashion deals:';
+  } else if (/shoe|joot|sneaker|chappal|sandal|boot|footwear/i.test(lower)) {
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? 'Zabardast choice Janab! Jooton aur sneakers par Bata aur top brands ne qeematein aadhi kar di hain, jahan seedha Rs. 1,000+ ki bachat mil rahi hai. Yeh dekhein top footwear deals:'
+        : 'Great taste Janab! Bata and top footwear brands are offering huge markdowns right now. Here are the verified shoe deals:';
+  } else if (/food|burger|pizza|khana|biryani|dine|restaurant|shawarma|karahi|roll/i.test(lower)) {
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? 'Bhook lagi hai Janab? Cheezious aur hamare food partners par family combos aur pizza par 30% tak discount chal raha hai — khana lazeez aur pocket par bhi halka! Yeh dekhein active food deals:'
+        : 'Hungry Janab? Cheezious and food partners have special 30% discount combos live right now! Check out these mouthwatering food deals:';
+  } else if (/mobile|phone|laptop|electronics|tech|watch|gadget/i.test(lower)) {
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? 'Tech aur gadget lovers ke liye khushkhabri! PriceOye aur top electronics par verified official warranty ke sath dhamaka sale chal rahi hai. Yeh dekhein sab se saste tech deals:'
+        : 'Smart thinking Janab! PriceOye and electronics partners are offering massive markdowns with official warranty. Here are the top tech deals:';
+  } else if (/beauty|makeup|skin|perfume|cosmetic/i.test(lower)) {
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? 'Self-care aur cosmetics par Saeed Ghani aur top brands par direct bachat mil rahi hai! 100% natural aur certified products par special discounts dekhein:'
+        : 'Self-care time Janab! Saeed Ghani and beauty brands are running limited-time markdowns. Here are the top beauty deals:';
+  }
 
-  return { reply, deals: filtered.slice(0, 5), is_off_topic: false, language };
+  if (!categorySalesPitch) {
+    const topDeal = filtered[0];
+    const origPrice = topDeal?.original_price || 0;
+    const discPrice =
+      topDeal?.discount_price ||
+      (origPrice && topDeal?.discount_pct
+        ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
+        : origPrice);
+    const savings = origPrice > discPrice ? origPrice - discPrice : 0;
+    const savingsNote =
+      savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
+    categorySalesPitch =
+      language === 'roman_urdu'
+        ? `Janab! Main ne live database se aap ke liye sab se sasti aur zabardast deals nikaali hain! Top deal par ${topDeal?.discount_pct || 0}% discount chal raha hai${savingsNote}. Limited stock hai, foran claim karein:`
+        : `Janab! I hand-picked the best live database deals for you with maximum savings! The top deal offers ${topDeal?.discount_pct || 0}% OFF${savingsNote}. Limited stock, check them out:`;
+  }
+
+  return { reply: categorySalesPitch, deals: filtered.slice(0, 5), is_off_topic: false, language };
 }
 
 export async function askJumbleBachatAssistant(
@@ -278,10 +412,12 @@ export async function askJumbleBachatAssistant(
 
   // Detect language
   const urduMarkers = [
-    'pe', 'par', 'sasti', 'sasta', 'dikhao', 'batao', 'chahye', 'hai', 'hain',
-    'wali', 'walay', 'mein', 'kapron', 'jootay', 'khana', 'mujhe', 'karo',
-    'choot', 'bachat', 'dhamaka', 'aadhi', 'qimat', 'kya', 'le', 'sakta', 'meri',
-    'kese', 'kaise', 'bhi', 'kuch', 'kitna'
+    'pe', 'par', 'sasti', 'sasta', 'dikhao', 'dikhayein', 'batao', 'btana', 'btao', 'bata',
+    'chahye', 'chahiye', 'hai', 'hain', 'ho', 'wali', 'walay', 'wala', 'mein',
+    'men', 'kapron', 'jootay', 'khana', 'mujhe', 'karo', 'kar', 'choot',
+    'bachat', 'dhamaka', 'aadhi', 'qimat', 'kya', 'le', 'sakta', 'meri',
+    'kese', 'kaise', 'bhi', 'kuch', 'kitna', 'ki', 'ka', 'ke', 'ko', 'se',
+    'ye', 'yeh', 'wo', 'woh', 'bhai', 'baji', 'janab', 'dost'
   ];
   const isRomanUrdu = urduMarkers.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(lower));
   const language: 'roman_urdu' | 'english' = isRomanUrdu ? 'roman_urdu' : 'english';
@@ -414,7 +550,39 @@ OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
           const matchedIds: string[] = Array.isArray(parsed.matched_deal_ids)
             ? parsed.matched_deal_ids
             : [];
-          const matchedDeals = liveDeals.filter((d) => matchedIds.includes(d.id));
+          let matchedDeals = liveDeals.filter((d) => matchedIds.includes(d.id));
+
+          // Cross-verify: if user specifically mentioned a brand name, strictly prioritize that brand
+          const isKhaadi = /khaadi/i.test(lower);
+          const isOutfitters = /outfitter/i.test(lower);
+          const isGulAhmed = /gul\s*ahmed|gulahmed/i.test(lower);
+          const isBata = /bata/i.test(lower);
+          const isCheezious = /cheezious/i.test(lower);
+          const isPriceOye = /price\s*oye|priceoye/i.test(lower);
+          const isSaeedGhani = /saeed\s*ghani|saeedghani/i.test(lower);
+
+          if (isKhaadi) {
+            const kb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('khaadi') || (d.title || '').toLowerCase().includes('khaadi'));
+            if (kb.length > 0) matchedDeals = kb;
+          } else if (isOutfitters) {
+            const ob = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('outfitter') || (d.title || '').toLowerCase().includes('outfitter'));
+            if (ob.length > 0) matchedDeals = ob;
+          } else if (isGulAhmed) {
+            const gb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('gul') || (d.title || '').toLowerCase().includes('gul'));
+            if (gb.length > 0) matchedDeals = gb;
+          } else if (isBata) {
+            const bb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('bata') || (d.title || '').toLowerCase().includes('bata'));
+            if (bb.length > 0) matchedDeals = bb;
+          } else if (isCheezious) {
+            const cb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('cheezious') || (d.title || '').toLowerCase().includes('cheezious'));
+            if (cb.length > 0) matchedDeals = cb;
+          } else if (isPriceOye) {
+            const pb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('priceoye') || (d.title || '').toLowerCase().includes('priceoye'));
+            if (pb.length > 0) matchedDeals = pb;
+          } else if (isSaeedGhani) {
+            const sb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('saeed') || (d.title || '').toLowerCase().includes('saeed'));
+            if (sb.length > 0) matchedDeals = sb;
+          }
 
           return {
             reply: parsed.reply || 'Yeh rahein aap ke liye behtareen deals:',

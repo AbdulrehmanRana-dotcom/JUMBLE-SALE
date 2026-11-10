@@ -58,6 +58,7 @@ export default function AIAssistantScreen() {
   const [messages, setMessages] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [contextualChips, setContextualChips] = useState<string[]>(SUGGESTED_QUESTIONS);
 
   // 1. Load initial chat history from database if user is logged in
   useEffect(() => {
@@ -171,6 +172,10 @@ export default function AIAssistantScreen() {
 
       setMessages((prev) => [...prev, assistantMsg]);
 
+      if (aiResult.suggested_chips && aiResult.suggested_chips.length > 0) {
+        setContextualChips(aiResult.suggested_chips);
+      }
+
       // Record in Supabase chat_messages table if authenticated
       if (user?.id) {
         try {
@@ -253,7 +258,7 @@ export default function AIAssistantScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}>
-            {SUGGESTED_QUESTIONS.map((chip, idx) => (
+            {contextualChips.map((chip, idx) => (
               <Pressable
                 key={idx}
                 style={styles.chip}

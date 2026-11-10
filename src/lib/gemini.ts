@@ -158,6 +158,24 @@ export interface AssistantResponse {
   deals: Deal[];
   is_off_topic: boolean;
   language: 'roman_urdu' | 'english';
+  suggested_chips?: string[];
+}
+
+export function normalizeDesiTypos(text: string): string {
+  let normalized = (text || '').toLowerCase();
+  // Brand name common typos
+  normalized = normalized.replace(/\b(?:khadi|khaddi|khedi|kaddi)\b/g, 'khaadi');
+  normalized = normalized.replace(/\b(?:otfiters|outfiter|outfitr|otfitr)\b/g, 'outfitters');
+  normalized = normalized.replace(/\b(?:gulahmed|gul\s*ahmd|gull\s*ahmed)\b/g, 'gul ahmed');
+  normalized = normalized.replace(/\b(?:cheezios|cheezus|chezious|cheezos|chezios)\b/g, 'cheezious');
+  normalized = normalized.replace(/\b(?:batta)\b/g, 'bata');
+  normalized = normalized.replace(/\b(?:pricoye|priceoi|price\s*oi)\b/g, 'priceoye');
+  normalized = normalized.replace(/\b(?:saeedgani|said\s*ghani|saeed\s*gani)\b/g, 'saeed ghani');
+  // Category common typos
+  normalized = normalized.replace(/\b(?:diner|dinr|dinnr)\b/g, 'dinner');
+  normalized = normalized.replace(/\b(?:shose|snekers|sneker|joty|chpal)\b/g, 'shoes');
+  normalized = normalized.replace(/\b(?:kpry|kapray|korti|kurtiyan)\b/g, 'kapray');
+  return normalized;
 }
 
 function runDeterministicBachatSearch(
@@ -165,7 +183,8 @@ function runDeterministicBachatSearch(
   liveDeals: Deal[],
   language: 'roman_urdu' | 'english'
 ): AssistantResponse {
-  const lower = query.toLowerCase().trim();
+  const rawLower = query.toLowerCase().trim();
+  const lower = normalizeDesiTypos(rawLower);
 
   // 1. Strict Out-of-Syllabus Guard (Prioritized)
   const offTopicPatterns = [
@@ -186,6 +205,12 @@ function runDeterministicBachatSearch(
       deals: [],
       is_off_topic: true,
       language,
+      suggested_chips: [
+        '👗 Khaadi & Gul Ahmed Sale',
+        '🍕 Cheezious Pizza Combos',
+        '👟 Bata Shoes 50% Off',
+        '🎯 Rs. 3,000 Budget Deals',
+      ],
     };
   }
 
@@ -198,14 +223,88 @@ function runDeterministicBachatSearch(
     const top3 = liveDeals.slice(0, 3);
     const reply =
       'Walaikum Assalam Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj Pakistan ke kis brand ya category par shopping ka irada hai — kapray, branded shoes, naya phone ya shaam ke khane ki deal? Aur budget kitna zehan mein hai?\n\nJab tak aap batayein, is waqt ki top 3 trending verified offers yeh hain:';
-    return { reply, deals: top3, is_off_topic: false, language: 'roman_urdu' };
+    return {
+      reply,
+      deals: top3,
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👗 Khaadi & Gul Ahmed Sale',
+        '👟 Bata Shoes Sale',
+        '🍕 Cheezious Pizza Combos',
+        '🎯 Rs. 3,000 Budget',
+      ],
+    };
   }
 
   if (isHey || isCasualGreeting) {
     const top3 = liveDeals.slice(0, 3);
     const reply =
       'Hello Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj kis cheez ki shopping ka irada hai — naye kapray, jootay, budget smartphone ya shaam ka dinner? Aur kitna budget zehan mein hai?\n\nYeh dekhein is waqt ki sab se garam live verified deals:';
-    return { reply, deals: top3, is_off_topic: false, language: 'roman_urdu' };
+    return {
+      reply,
+      deals: top3,
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👗 Khaadi & Gul Ahmed Sale',
+        '👟 Bata Shoes Sale',
+        '🍕 Cheezious Pizza Combos',
+        '🎯 Rs. 3,000 Budget',
+      ],
+    };
+  }
+
+  // 3. Needs Discovery & Broad Shopping Guidance (e.g. "madad kro meri shopping krnay mai")
+  const isGuidanceOrHelpQuery =
+    /\b(?:madad|help|guide|guidance|mashwara|mashwarah|suggest|suggestion|recommend|recommendation|shopping\s*krnay|shopping\s*karni|samajh\s*nahi\s*aa\s*raha|kya\s*khareedon|kya\s*loon|kuch\s*batao|kahan\s*se\s*shuru)\b/i.test(
+      lower
+    ) ||
+    /madad\s*kro|shopping\s*krnay\s*mai|shopping\s*karne\s*mein|shopping\s*guide/i.test(lower);
+
+  if (isGuidanceOrHelpQuery) {
+    const reply =
+      'Hukam karein Janab! Main aapki shopping mein madad karne aur aapke hazaron rupay bachane ke liye hi hazir hoon! 🛍️\n\nSir, aap aaj kis tarah ke product mein dilchaspi rakhte hain?\n• 👗 Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed)\n• 👟 Footwear & Jootay (Bata Pakistan)\n• 📱 Mobiles & Electronics (PriceOye)\n• 🍕 Dinners & Fast Food (Cheezious)\n\nAur shopping ke liye aap ka target budget kitna zehan mein hai? Neechay diye gaye options par tap karein ya mujhe batayein:';
+
+    return {
+      reply,
+      deals: [], // NO BLIND POST DUMPING! True consultative discovery
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👗 Kapray & Lawn',
+        '👟 Branded Shoes',
+        '🍕 Dinners & Food',
+        '📱 Phones & Tech',
+        '🎯 Rs. 3,000 Budget',
+      ],
+    };
+  }
+
+  // 4. Ambiguity Counter-Questioning (e.g. "kuch acha dikhao", "kuch sasta", "gift chahiye")
+  const isAmbiguousBroadQuery =
+    /\b(?:kuch\s*acha|kuch\s*bhi|acha\s*sa|gift\s*lena|gift\s*chahiye|best\s*cheez|top\s*cheez|sab\s*se\s*acha)\b/i.test(
+      lower
+    ) &&
+    !/khaadi|outfitters|bata|cheezious|priceoye|saeed|lawn|shoe|pizza|phone|dinner/i.test(lower);
+
+  if (isAmbiguousBroadQuery) {
+    const reply =
+      'Zaroor Janab! Behtareen recommendations nikaal deta hoon jahan sab se bari bachat ho rahi hai. Sir, thora wazeh farmayein:\n1. Yeh shopping ladies ke liye hai ya gents ke liye?\n2. Aap naye kapray, jootay, gadgets ya dinner deal dhoondh rahe hain?\n3. Aur target budget kitna zehan mein hai?';
+
+    return {
+      reply,
+      deals: [],
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👗 Ladies Lawn & Kurtis',
+        '👕 Gents Casual Wear',
+        '👟 Bata Footwear',
+        '📱 Tech Deals',
+        '💰 Under Rs. 4,000',
+      ],
+    };
   }
 
   // 2. Specific Brand Name Mentions (Exact Brand Pitching)
@@ -302,7 +401,26 @@ function runDeterministicBachatSearch(
         ? `Janab! ${brandPitchedName} par is waqt zabardast offers chal rahi hain! Sab se top deal "${topDeal.title}" par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Stock bohot tezi se nikal raha hai, yeh dekhein ${brandPitchedName} ki active verified deals:`
         : `Great news Janab! ${brandPitchedName} currently has verified active sales with up to ${topDeal.discount_pct}% OFF${savingsNote}. Here are the top deals from ${brandPitchedName}:`;
 
-    return { reply, deals: brandMatches.slice(0, 5), is_off_topic: false, language };
+    let brandChips = [
+      '💰 Is se sasta alternative',
+      '🔥 50%+ OFF Flash Deals',
+      '⚡ Claim Deal',
+    ];
+    if (isKhaadi || isOutfitters || isGulAhmed) {
+      brandChips = ['👟 Matching Bata Shoes', '💰 Is se sasta alternative', '🔥 50%+ OFF Flash Deals'];
+    } else if (isCheezious) {
+      brandChips = ['🥤 Wings & Drinks Combo', '🍔 Fast Food Alternative', '🛵 Delivery Info'];
+    } else if (isBata) {
+      brandChips = ['👗 Matching Khaadi Kurti', '👟 Casual Sneakers', '💰 Under Rs. 2,000'];
+    }
+
+    return {
+      reply,
+      deals: brandMatches.slice(0, 5),
+      is_off_topic: false,
+      language,
+      suggested_chips: brandChips,
+    };
   }
 
   // 3. Budget Query
@@ -338,7 +456,18 @@ function runDeterministicBachatSearch(
           ? `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein main ne top verified deals nikali hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (aur seedha Rs. ${savings.toLocaleString()} ki bachat ho rahi hai!). Stock limited hai, neechay diye gaye card se foran claim karein:`
           : `Don't worry Janab! Within your Rs. ${maxBudget.toLocaleString()} budget, I hand-picked the best deals. Top recommendation is "${topPick.title}" from ${brandName} at only Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Limited stock, claim below:`;
 
-      return { reply, deals: affordableDeals.slice(0, 5), is_off_topic: false, language };
+      return {
+        reply,
+        deals: affordableDeals.slice(0, 5),
+        is_off_topic: false,
+        language,
+        suggested_chips: [
+          '👗 Outfits in Budget',
+          '👟 Shoes in Budget',
+          '🍕 Food in Budget',
+          '💡 Sasta Alternative',
+        ],
+      };
     }
   }
 
@@ -443,7 +572,18 @@ function runDeterministicBachatSearch(
           ? `Bhook lagi hai Janab? Cheezious aur hamare verified food partners par dinner, fast food aur pizza combos par 30% tak discount chal raha hai — khana lazeez aur bachat zabardast! Top deal par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Yeh dekhein active food & dinner deals:`
           : `Hungry Janab? Cheezious and food partners have special 30% discount combos live right now${savingsNote}! Here are the active dinner and food deals:`;
 
-      return { reply, deals: foodDeals.slice(0, 5), is_off_topic: false, language };
+      return {
+        reply,
+        deals: foodDeals.slice(0, 5),
+        is_off_topic: false,
+        language,
+        suggested_chips: [
+          '🥤 Wings & Drinks Combo',
+          '🍔 Burger Deals',
+          '💰 Under Rs. 1,500',
+          '🛵 Fast Delivery',
+        ],
+      };
     }
   }
 
@@ -478,7 +618,18 @@ function runDeterministicBachatSearch(
           ? `Wah Janab! Kapron aur lawn collection par is waqt Jumble Sale par sab se bari bachat chal rahi hai! Khaadi, Outfitters aur Gul Ahmed par 30% se 50% tak flat discount mil raha hai${savingsNote}. Yeh dekhein top verified fashion deals:`
           : `Superb choice Janab! We have massive sales on lawn, pret and apparel today with up to 50% OFF${savingsNote}. Here are the top verified fashion deals:`;
 
-      return { reply, deals: fashionDeals.slice(0, 5), is_off_topic: false, language };
+      return {
+        reply,
+        deals: fashionDeals.slice(0, 5),
+        is_off_topic: false,
+        language,
+        suggested_chips: [
+          '👟 Matching Bata Shoes',
+          '👗 Khaadi Flat 50%',
+          '👕 Outfitters Streetwear',
+          '💰 Under Rs. 3,000',
+        ],
+      };
     }
   }
 
@@ -511,7 +662,18 @@ function runDeterministicBachatSearch(
           ? `Zabardast choice Janab! Jooton aur sneakers par Bata aur top footwear brands ne qeematein aadhi kar di hain, jahan seedha Rs. 1,000+ ki bachat mil rahi hai${savingsNote}. Yeh dekhein top footwear deals:`
           : `Great taste Janab! Bata and top footwear brands are offering huge markdowns right now${savingsNote}. Here are the verified shoe deals:`;
 
-      return { reply, deals: shoeDeals.slice(0, 5), is_off_topic: false, language };
+      return {
+        reply,
+        deals: shoeDeals.slice(0, 5),
+        is_off_topic: false,
+        language,
+        suggested_chips: [
+          '👗 Matching Outfits',
+          '👟 Bata Casual Sneakers',
+          '👠 Formal Khussa / Heels',
+          '💰 Under Rs. 2,000',
+        ],
+      };
     }
   }
 

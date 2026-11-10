@@ -280,41 +280,321 @@ export function normalizeDesiTypos(text: string): string {
   normalized = normalized.replace(/\b(?:batta)\b/g, 'bata');
   normalized = normalized.replace(/\b(?:pricoye|priceoi|price\s*oi)\b/g, 'priceoye');
   normalized = normalized.replace(/\b(?:saeedgani|said\s*ghani|saeed\s*gani)\b/g, 'saeed ghani');
-  // Category common typos (note: preserve "diners"/"diner" for Pakistani brand handling, only fix dinnr)
+  // Category common typos (preserve "diners"/"diner" for Pakistani brand handling, only fix dinnr)
   normalized = normalized.replace(/\b(?:dinr|dinnr)\b/g, 'dinner');
   normalized = normalized.replace(/\b(?:shose|snekers|sneker|joty|chpal)\b/g, 'shoes');
   normalized = normalized.replace(/\b(?:kpry|kapray|korti|kurtiyan)\b/g, 'kapray');
   return normalized;
 }
 
+// ==============================================================================
+// 2B. OMNI-DOMAIN DEEP QUERY PARSER & SEMANTIC UNDERSTANDING
+// ==============================================================================
+
+export type SalesmanIntent =
+  | 'greeting'
+  | 'platform_inquiry'
+  | 'guidance_discovery'
+  | 'product_inquiry'
+  | 'show_request'
+  | 'budget_constrained'
+  | 'coreference_followup'
+  | 'policy_support'
+  | 'off_topic_trivia';
+
+export interface ParsedSentence {
+  raw: string;
+  normalized: string;
+  intent: SalesmanIntent;
+  coreEntity?: string;
+  modifiers: string[];
+  primaryCategory?: string;
+  primaryBrand?: string;
+  isExplicitShow: boolean;
+  budgetConstraint?: number;
+  demographic?: 'ladies' | 'gents' | 'unisex';
+  hasShoppingIntent: boolean;
+}
+
+export function parseFullSentence(
+  rawQuery: string,
+  state?: ConversationState
+): ParsedSentence {
+  const raw = (rawQuery || '').trim();
+  const lower = raw.toLowerCase();
+  const normalized = normalizeDesiTypos(lower);
+
+  // 1. Explicit Show Command Detection (Show-on-Demand Policy)
+  const isExplicitShow =
+    /\b(?:dikhao|dikhayein|dikha|dekhao|dekhein|show|posts|cards|post|card|dikha\s*do|dikhao\s*bhai|dikha\s*de|dikha\s*dein|dikhao\s*deals)\b/i.test(
+      normalized
+    );
+
+  // 2. Budget Extraction
+  let budgetConstraint: number | undefined;
+  const budgetMatch =
+    normalized.match(/(?:budget|range|under|andar|tak|mein)(?:[^\d]{1,15})?(\d{3,6})/i) ||
+    normalized.match(/(\d{3,6})(?:[^\d]{1,15})?(?:budget|ke\s*andar|tak)/i) ||
+    normalized.match(/(?:rs\.?|pkr)\s*(\d{3,6})/i);
+  if (budgetMatch) {
+    budgetConstraint = parseInt(budgetMatch[1], 10);
+  } else if (state?.activeBudget) {
+    budgetConstraint = state.activeBudget;
+  }
+
+  // 3. Demographic Extraction
+  let demographic: 'ladies' | 'gents' | 'unisex' | undefined;
+  if (/\b(?:ladies|women|female|aurat|auraton|baji|girls)\b/i.test(normalized)) {
+    demographic = 'ladies';
+  } else if (/\b(?:gents|men|mens|male|mard|bhai|boys)\b/i.test(normalized)) {
+    demographic = 'gents';
+  } else if (state?.targetAudience) {
+    demographic = state.targetAudience;
+  }
+
+  // 4. Primary Brand Extraction
+  let primaryBrand: string | undefined;
+  if (/khaadi/i.test(normalized)) primaryBrand = 'Khaadi';
+  else if (/outfitter/i.test(normalized)) primaryBrand = 'Outfitters';
+  else if (/gul\s*ahmed|gulahmed/i.test(normalized)) primaryBrand = 'Gul Ahmed';
+  else if (/bata/i.test(normalized)) primaryBrand = 'Bata Pakistan';
+  else if (/cheezious/i.test(normalized)) primaryBrand = 'Cheezious';
+  else if (/price\s*oye|priceoye/i.test(normalized)) primaryBrand = 'PriceOye';
+  else if (/saeed\s*ghani|saeedghani/i.test(normalized)) primaryBrand = 'Saeed Ghani';
+  else if (/imtiaz/i.test(normalized)) primaryBrand = 'Imtiaz Super Market';
+  else if (/habitt/i.test(normalized)) primaryBrand = 'Habitt';
+  else if (
+    /\b(?:diners|diner|dinners)\b/i.test(normalized) &&
+    !/\b(?:pizza|burger|fast\s*food|khana|dine)\b/i.test(normalized)
+  ) {
+    primaryBrand = 'Diners';
+  }
+
+  // 5. Primary Category Extraction
+  let currentQueryCategory: string | undefined;
+  if (/\b(?:shoe|shoes|joot|jootay|jooton|sneaker|sneakers|boot|boots|jogger|joggers|chappal|sandal|sandals|cleats|studs)\b/i.test(normalized)) {
+    currentQueryCategory = 'footwear';
+  } else if (/\b(?:kapr|kapray|kapron|lawn|kurti|kurtis|suit|suits|dress|dresses|pret|streetwear|fashion|clothes|cloth|shirt|shirts|pant|pants)\b/i.test(normalized)) {
+    currentQueryCategory = 'fashion';
+  } else if (/\b(?:food|pizza|burger|burgers|wings|khana|dinner|fast\s*food|shawarma|karahi|roll|meal|restaurant)\b/i.test(normalized)) {
+    currentQueryCategory = 'food';
+  } else if (/\b(?:mobile|mobiles|phone|phones|smartphone|gadget|gadgets|earbud|earbuds|airpod|airpods|laptop|electronics|redmi)\b/i.test(normalized)) {
+    currentQueryCategory = 'electronics';
+  } else if (/\b(?:beauty|makeup|skin|skincare|serum|hair\s*oil|cream|cosmetics|rose\s*water)\b/i.test(normalized)) {
+    currentQueryCategory = 'beauty';
+  } else if (/\b(?:grocery|groceries|rashan|supermarket|oil|ghee|atta|sugar|rice|daal)\b/i.test(normalized)) {
+    currentQueryCategory = 'grocery';
+  } else if (/\b(?:furniture|bed|beds|bedsheet|bedsheets|sofa|sofas|cushion|decor|curtain|home)\b/i.test(normalized)) {
+    currentQueryCategory = 'home';
+  }
+
+  let primaryCategory = currentQueryCategory;
+  if (!primaryCategory && primaryBrand) {
+    if (['Khaadi', 'Outfitters', 'Gul Ahmed', 'Diners'].includes(primaryBrand)) primaryCategory = 'fashion';
+    else if (primaryBrand === 'Bata Pakistan') primaryCategory = 'footwear';
+    else if (primaryBrand === 'Cheezious') primaryCategory = 'food';
+    else if (primaryBrand === 'PriceOye') primaryCategory = 'electronics';
+    else if (primaryBrand === 'Saeed Ghani') primaryCategory = 'beauty';
+    else if (primaryBrand === 'Imtiaz Super Market') primaryCategory = 'grocery';
+    else if (primaryBrand === 'Habitt') primaryCategory = 'home';
+  }
+
+  // 6. Has Retail/Shopping Intent Check in current query
+  const hasCurrentShoppingIntent =
+    Boolean(currentQueryCategory || primaryBrand) ||
+    /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|voucher|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|brand|brands|products|product|shop|store|collection|pret|lawn|unstitched|suit|jootay|sneakers|phone|delivery|exchange|return|cost)\b/i.test(
+      normalized
+    );
+
+  // Inherit category from conversation memory ONLY when shopping/product intent exists
+  if (!primaryCategory && state?.activeCategory && (hasCurrentShoppingIntent || isExplicitShow)) {
+    primaryCategory = state.activeCategory;
+  }
+
+  const hasShoppingIntent = hasCurrentShoppingIntent || Boolean(primaryCategory);
+
+  // 7. Core Entity & Modifiers extraction
+  const modifiers: string[] = [];
+  let coreEntity = primaryCategory || 'general';
+
+  if (/\b(?:football|soccer|cricket|tennis|hockey|running|gym|workout|sports)\b/i.test(normalized)) {
+    modifiers.push('sports');
+    if (/\bfootball\b/i.test(normalized)) modifiers.push('football');
+  }
+  if (/\b(?:formal|casual|party|shaadi|wedding|pret|unstitched)\b/i.test(normalized)) {
+    modifiers.push('formal_pret');
+  }
+  if (/\b(?:sasta|cheapest|low\s*price|kam\s*qimat|bachat)\b/i.test(normalized)) {
+    modifiers.push('cheapest');
+  }
+
+  // 8. Intent Classification
+  const isSalam = /\b(?:salam|asalam|assalam|aslamu|assalamu|aoa)\b/i.test(normalized);
+  const isHey = /^(?:hey|hi|hello|heya)\b/i.test(normalized);
+  const isCasualGreeting = /^(?:kya haal|kese ho|kaise ho)\b/i.test(normalized);
+  const isPureGreeting = (isSalam || isHey || isCasualGreeting) && !hasShoppingIntent;
+
+  const isPlatformInquiry =
+    /\b(?:kis\s*trah\s*ki|kis\s*tarah\s*ki|kis\s*qism\s*ki|kya\s*milta|kya\s*bechte|kya\s*kya\s*hai|kaun\s*se\s*brand|konse\s*brand|brands\s*hain|brands\s*han|products\s*hain|products\s*han|jumble\s*sale\s*kya|about\s*jumble|what\s*products|what\s*brands)\b/i.test(
+      normalized
+    ) ||
+    /kis\s*trah\s*ki\s*products|kis\s*tarah\s*ki\s*products|brand\s*mai\s*kis|brand\s*mein\s*kis|products\s*han|products\s*hain|app\s*mai\s*kya|app\s*mein\s*kya/i.test(
+      normalized
+    );
+
+  const isGuidance =
+    /\b(?:madad|help|guide|guidance|mashwara|mashwarah|suggest|suggestion|recommend|recommendation|samajh\s*nahi\s*aa\s*raha|kya\s*khareedon|kya\s*loon|kuch\s*batao|kahan\s*se\s*shuru)\b/i.test(
+      normalized
+    ) ||
+    /madad\s*kro|madad\s*karo|shopping\s*krnay\s*mai|shopping\s*karne\s*mein|shopping\s*guide/i.test(normalized);
+
+  const isCoreference =
+    /\b(?:in\s*mai\s*se|in\s*mein\s*se|in\s*me\s*se|in\s*se|un\s*mai\s*se|un\s*mein\s*se|unke\s*hi|unhi\s*ke|wohi\s*dikha|unke\s*dikhao)\b/i.test(
+      normalized
+    ) ||
+    (/\b(?:sab\s*se\s*sasta|sab\s*se\s*sasti|sab\s*se\s*kam|cheapest|lowest)\b/i.test(normalized) &&
+      Boolean(state?.activeBrand || (state?.lastPitchedDeals && state.lastPitchedDeals.length > 0)));
+
+  const isPolicySupport =
+    /\b(?:delivery\s*time|kitne\s*din|delivery\s*charges|delivery\s*fees|return\s*policy|exchange\s*policy|cod|cash\s*on\s*delivery|shipping|order\s*track)\b/i.test(
+      normalized
+    );
+
+  const isSportsTrivia =
+    /\b(?:match|score|player|ronaldo|messi|babar|virat|fifa|pes|pubg|free\s*fire|who\s*won|kaun\s*jeeta|score\s*kya|tournament)\b/i.test(
+      normalized
+    ) ||
+    (/\b(?:football|soccer|cricket|hockey|tennis)\b/i.test(normalized) &&
+      !/\b(?:shoe|shoes|joot|jootay|boot|boots|sneaker|sneakers|spikes|studs|chappal|sandal|jogger|kit|jersey|shirt|bat|ball|equipment|khareed|buy|available|mil\s*jaye|chahiye|dikhao|price|rate|deal)\b/i.test(
+        normalized
+      ));
+
+  const otherOffTopic = [
+    /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
+    /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*created|tell\s*me\s*a\s*story)\b/i,
+  ];
+  const isGeneralOffTopic = otherOffTopic.some((rgx) => rgx.test(normalized));
+
+  let intent: SalesmanIntent = 'product_inquiry';
+
+  if (isPureGreeting) {
+    intent = 'greeting';
+  } else if (isGeneralOffTopic || (isSportsTrivia && !hasCurrentShoppingIntent)) {
+    intent = 'off_topic_trivia';
+  } else if (isPlatformInquiry) {
+    intent = 'platform_inquiry';
+  } else if (isGuidance) {
+    intent = 'guidance_discovery';
+  } else if (isCoreference) {
+    intent = 'coreference_followup';
+  } else if (isPolicySupport) {
+    intent = 'policy_support';
+  } else if (isExplicitShow) {
+    intent = 'show_request';
+  } else if (budgetConstraint && !primaryBrand && !primaryCategory) {
+    intent = 'budget_constrained';
+  } else if (hasShoppingIntent) {
+    intent = isExplicitShow ? 'show_request' : 'product_inquiry';
+  } else {
+    intent = 'off_topic_trivia';
+  }
+
+  return {
+    raw,
+    normalized,
+    intent,
+    coreEntity,
+    modifiers,
+    primaryCategory,
+    primaryBrand,
+    isExplicitShow,
+    budgetConstraint,
+    demographic,
+    hasShoppingIntent,
+  };
+}
+
+// ==============================================================================
+// 2C. THE 7 CORE CONDITIONS GATEKEEPER & ZERO-JARGON SANITIZER
+// ==============================================================================
+
+export function sanitizeSalesmanJargon(text: string): string {
+  if (!text) return '';
+  let clean = text;
+  clean = clean.replace(/\blive database\b/gi, 'hamare platform');
+  clean = clean.replace(/\bdatabase mein\b/gi, 'hamare paas');
+  clean = clean.replace(/\bdatabase\b/gi, 'verified brand partners');
+  clean = clean.replace(/\bsystem\b/gi, 'platform');
+  clean = clean.replace(/\brecords\b/gi, 'brand offers');
+  clean = clean.replace(/\bquery\b/gi, 'sawal');
+  return clean;
+}
+
+export function enforceSalesmanConditions(
+  res: AssistantResponse,
+  parsed: ParsedSentence,
+  state?: ConversationState,
+  liveDeals: Deal[] = []
+): AssistantResponse {
+  // Condition 2: Zero Developer Jargon Enforcement
+  const cleanReply = sanitizeSalesmanJargon(res.reply || '');
+
+  // Condition 7: Strict Out-of-Syllabus Boundary Enforcement
+  if (parsed.intent === 'off_topic_trivia') {
+    return {
+      reply:
+        res.language === 'roman_urdu'
+          ? "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?"
+          : "Sorry, I can't answer that. I am your Jumble Sale shopping assistant, exclusively here to help you discover verified brand deals and discounts across Pakistan.",
+      deals: [],
+      is_off_topic: true,
+      language: res.language,
+      suggested_chips: [
+        '👗 Khaadi & Gul Ahmed Sale',
+        '🍕 Cheezious Pizza Combos',
+        '👟 Bata Shoes 50% Off',
+        '🎯 Rs. 3,000 Budget Deals',
+      ],
+    };
+  }
+
+  // Condition 3: Show-on-Demand Policy Enforcement
+  // Deal cards are STRICTLY suppressed (deals: []) unless:
+  // - The user explicitly commanded to show/view deals ("dikhao", "show", "posts", "cards")
+  // - OR it was an explicit coreference follow-up like "in mai se sasta" / "unke hi dikha do"
+  const isAllowableFollowup =
+    parsed.intent === 'coreference_followup' &&
+    /\b(?:sasta|sasti|kam|unke|unhi|wohi)\b/i.test(parsed.normalized);
+
+  let finalDeals: Deal[] = res.deals || [];
+  if (!parsed.isExplicitShow && !isAllowableFollowup) {
+    finalDeals = [];
+  }
+
+  return {
+    ...res,
+    reply: cleanReply,
+    deals: finalDeals,
+    is_off_topic: Boolean(res.is_off_topic),
+  };
+}
+
+// ==============================================================================
+// 2D. DETERMINISTIC HEURISTIC SALESMAN (EVALUATING 7 CONDITIONS & 8 DOMAINS)
+// ==============================================================================
+
 function runDeterministicBachatSearch(
   query: string,
   liveDeals: Deal[],
   language: 'roman_urdu' | 'english',
-  state?: ConversationState
+  state?: ConversationState,
+  preParsed?: ParsedSentence
 ): AssistantResponse {
-  const rawLower = query.toLowerCase().trim();
-  const lower = normalizeDesiTypos(rawLower);
+  const parsed = preParsed || parseFullSentence(query, state);
+  const lower = parsed.normalized;
 
-  // 1. Strict Out-of-Syllabus Guard (Prioritized)
-  const hasProductOrShoppingIntent =
-    /\b(?:shoe|shoes|joot|jootay|jooti|boot|boots|sneaker|sneakers|spikes|studs|chappal|sandal|jogger|joggers|kit|jersey|shirt|shirts|pant|pants|bat|ball|racket|equipment|wear|clothes|cloth|kapr|kapray|dress|phone|mobile|pizza|burger|khana|dinner|khareed|buy|shopping|price|qimat|rate|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|bachat|sale|deal|deals)\b/i.test(
-      lower
-    );
-
-  const sportsOffTopicRegex =
-    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i;
-  const isSportsOffTopic = sportsOffTopicRegex.test(lower) && !hasProductOrShoppingIntent;
-
-  const otherOffTopicPatterns = [
-    // Casual Chit-Chat, Personal Queries, TV & Media
-    /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
-    // Politics, News, Weather, Coding & General Knowledge
-    /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
-  ];
-  const isStrictlyOffTopic = isSportsOffTopic || otherOffTopicPatterns.some((rgx) => rgx.test(lower));
-
-  if (isStrictlyOffTopic) {
+  // BRANCH 1: Strict Out-of-Syllabus Off-Topic
+  if (parsed.intent === 'off_topic_trivia') {
     const refusal =
       language === 'roman_urdu'
         ? "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?"
@@ -333,17 +613,16 @@ function runDeterministicBachatSearch(
     };
   }
 
-  // 2. Greeting Detection (Trained Customer Service Courtesy)
-  const isSalam = /\b(?:salam|asalam|assalam|aslamu|assalamu|aoa)\b/i.test(lower);
-  const isHey = /^(?:hey|hi|hello|heya)\b/i.test(lower);
-  const isCasualGreeting = /^(?:kya haal|kese ho|kaise ho)\b/i.test(lower);
+  // BRANCH 2: Respectful Pakistani Greetings
+  if (parsed.intent === 'greeting') {
+    const isSalam = /\b(?:salam|asalam|assalam|aslamu|assalamu|aoa)\b/i.test(lower);
+    const reply = isSalam
+      ? 'Walaikum Assalam Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj Pakistan ke kis brand ya category par shopping ka irada hai — kapray, branded shoes, naya smartphone ya shaam ka khana? Aur budget kitna zehan mein hai?\n\nAap batayein, main foran behtareen verified deals nikaal deta hoon!'
+      : 'Hello Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj kis cheez ki shopping ka irada hai — naye kapray, jootay, budget smartphone ya shaam ka dinner? Aur kitna budget zehan mein hai?\n\nAap batayein, main foran behtareen verified deals dikha deta hoon!';
 
-  if (isSalam) {
-    const reply =
-      'Walaikum Assalam Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj Pakistan ke kis brand ya category par shopping ka irada hai — kapray, branded shoes, naya smartphone ya shaam ka khana? Aur budget kitna zehan mein hai?\n\nAap batayein, main foran behtareen verified deals aur posts nikaal kar dikha deta hoon!';
     return {
       reply,
-      deals: [], // NO CARDS DUMPED ON GREETINGS!
+      deals: [],
       is_off_topic: false,
       language: 'roman_urdu',
       suggested_chips: [
@@ -355,38 +634,14 @@ function runDeterministicBachatSearch(
     };
   }
 
-  if (isHey || isCasualGreeting) {
+  // BRANCH 3: Platform & Brand Information Inquiries
+  if (parsed.intent === 'platform_inquiry') {
     const reply =
-      'Hello Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj kis cheez ki shopping ka irada hai — naye kapray, jootay, budget smartphone ya shaam ka dinner? Aur kitna budget zehan mein hai?\n\nAap batayein, main foran behtareen verified posts dikha deta hoon!';
+      'Janab, Jumble Sale par Pakistan ke registered official brands ki verified discounted products aur exclusive sales milti hain!\n\nHamare registered partners par in categories mein 30% se 70% tak direct bachat hoti hai:\n• 👗 Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed)\n• 👟 Footwear & Jootay (Bata Pakistan)\n• 📱 Mobiles & Electronics (PriceOye)\n• 🍕 Dinners & Fast Food (Cheezious)\n• 🛒 Grocery & Supermarket (Imtiaz Super Market)\n• 🏠 Home & Decor (Habitt)\n\nBatayein Janab, aapko kis brand ya category ki deals dekhni hain?';
+
     return {
       reply,
-      deals: [], // NO CARDS DUMPED ON GREETINGS!
-      is_off_topic: false,
-      language: 'roman_urdu',
-      suggested_chips: [
-        '👗 Khaadi Deals Dikhao',
-        '👟 Bata Shoes Dikhao',
-        '🍕 Cheezious Pizza Dikhao',
-        '🎯 Rs. 3,000 Budget Deals',
-      ],
-    };
-  }
-
-  // 3. Platform & Brand Information Inquiries (e.g. "tumharay brand mai kis trah ki products han?", "yahan kya milta hai?")
-  const isPlatformInfoQuery =
-    /\b(?:kis\s*trah\s*ki|kis\s*tarah\s*ki|kis\s*qism\s*ki|kya\s*milta|kya\s*bechte|kya\s*kya\s*hai|kaun\s*se\s*brand|konse\s*brand|brands\s*hain|brands\s*han|products\s*hain|products\s*han|jumble\s*sale\s*kya|about\s*jumble|what\s*products|what\s*brands)\b/i.test(
-      lower
-    ) ||
-    /kis\s*trah\s*ki\s*products|kis\s*tarah\s*ki\s*products|brand\s*mai\s*kis|brand\s*mein\s*kis|products\s*han|products\s*hain|app\s*mai\s*kya|app\s*mein\s*kya/i.test(
-      lower
-    );
-
-  if (isPlatformInfoQuery) {
-    const reply =
-      'Janab, Jumble Sale par Pakistan ke registered official brands ki verified discounted products aur exclusive sales milti hain!\n\nHamare registered partners par in categories mein 30% se 70% tak direct bachat hoti hai:\n• 👗 Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed)\n• 👟 Footwear & Jootay (Bata Pakistan)\n• 📱 Mobiles & Electronics (PriceOye)\n• 🍕 Dinners & Fast Food (Cheezious)\n• 🛒 Grocery & Supermarket (Imtiaz Super Market)\n• 🏠 Home & Decor (Habitt)\n\nBatayein Janab, aapko kis brand ya category ki deals aur posts dekhni hain?';
-    return {
-      reply,
-      deals: [], // NO BLIND POST DUMPING! Show on demand
+      deals: [],
       is_off_topic: false,
       language: 'roman_urdu',
       suggested_chips: [
@@ -398,42 +653,46 @@ function runDeterministicBachatSearch(
     };
   }
 
-  // 4. Diners (Menswear Brand) vs Dinner (Food) Handling (e.g. "orr dinners ki ha?", "dinners ki deal available ha?")
-  const isDinersBrandOrDinnerQuery =
-    /\b(?:diners|diner|dinners)\b/i.test(lower) &&
-    !/\b(?:pizza|burger|fast\s*food|shawarma|wings|karahi|lunch|breakfast)\b/i.test(lower) &&
-    !/\b(?:bhook|khane|khana)\b/i.test(lower);
-
-  if (isDinersBrandOrDinnerQuery) {
-    const isExplicitShow = /\b(?:dikhao|dikhayein|dekhao|show|posts|cards)\b/i.test(lower);
+  // BRANCH 4: Shopping Guidance & Consultative Discovery (e.g. "madad kro meri shopping krnay mai")
+  if (parsed.intent === 'guidance_discovery') {
     const reply =
-      "Janab, agar aap Diners (menswear brand) ki baat kar rahe hain to filhal Diners hamare platform par registered nahi hai, magar men's fashion aur kapron par hamare registered brands Khaadi aur Outfitters par 40% se 50% tak flat discount available hai!\n\nAur agar aap shaam ke Dinner (fast food ya pizza) ki deal dhoondh rahe hain to Cheezious par 30% OFF pizza combos live hain.\n\nBatayein Janab, aapko men's fashion deals dekhni hain ya dinner fast food ki posts dikhaoon?";
+      'Hukam karein Janab! Main aapki shopping mein madad karne aur aapke hazaron rupay bachane ke liye hi hazir hoon! 🛍️\n\nSir, aap aaj kis tarah ke product mein dilchaspi rakhte hain?\n• 👗 Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed)\n• 👟 Footwear & Jootay (Bata Pakistan)\n• 📱 Mobiles & Electronics (PriceOye)\n• 🍕 Dinners & Fast Food (Cheezious)\n\nAur shopping ke liye aap ka target budget kitna zehan mein hai? Aap batayein main foran best verified deals nikaal deta hoon!';
 
     return {
       reply,
-      deals: isExplicitShow
-        ? liveDeals.filter(d => {
-            const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-            return bName.includes('outfitter') || bName.includes('cheezious') || bName.includes('khaadi');
-          }).slice(0, 3)
-        : [],
+      deals: [],
       is_off_topic: false,
       language: 'roman_urdu',
       suggested_chips: [
-        '👕 Men\'s Fashion Deals Dikhao',
-        '🍕 Cheezious Pizza Dikhao',
-        '👗 Khaadi Deals Dikhao',
+        '👗 Kapray & Lawn',
+        '👟 Branded Shoes',
+        '🍕 Dinners & Food',
+        '📱 Phones & Tech',
+        '🎯 Rs. 3,000 Budget',
       ],
     };
   }
 
-  // 4B. Sports Footwear & Cleats/Shoes Handling (e.g. "football shoes mil jaye gai?", "sports shoes")
-  const isFootballOrSportsShoes =
-    /\b(?:football|soccer|sports|running|gym)\b/i.test(lower) &&
-    /\b(?:shoe|shoes|joot|jootay|boot|boots|sneaker|sneakers|spikes|studs|jogger|joggers)\b/i.test(lower);
+  // BRANCH 5: Policy & Support Inquiries (Delivery, Returns, Logistics)
+  if (parsed.intent === 'policy_support') {
+    const reply =
+      'Janab, Jumble Sale ke tamam registered official brand partners nationwide delivery provide karte hain (aam tor par 2 se 4 working days mein). Tamam deals 100% verified aur direct brand outlets aur websites se hoti hain.\n\nAapko kis specific brand ya product ki delivery ya order details maloom karni hain?';
 
-  if (isFootballOrSportsShoes) {
-    const isExplicitShow = /\b(?:dikhao|dikhayein|dikha|show|posts|cards)\b/i.test(lower);
+    return {
+      reply,
+      deals: [],
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👗 Khaadi Deals Dikhao',
+        '🍕 Cheezious Delivery Info',
+        '👟 Bata Exchange Policy',
+      ],
+    };
+  }
+
+  // BRANCH 6: Sub-category Disambiguation: Sports Footwear / Cleats (e.g. "football shoes mil jaye gai?")
+  if (parsed.modifiers.includes('football') && parsed.primaryCategory === 'footwear') {
     const shoeDeals = liveDeals.filter((d) => {
       const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
       const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
@@ -445,7 +704,7 @@ function runDeterministicBachatSearch(
 
     return {
       reply,
-      deals: isExplicitShow ? shoeDeals.slice(0, 3) : [],
+      deals: parsed.isExplicitShow ? shoeDeals.slice(0, 3) : [],
       is_off_topic: false,
       language: 'roman_urdu',
       suggested_chips: [
@@ -456,13 +715,37 @@ function runDeterministicBachatSearch(
     };
   }
 
-  // 5. Multi-Turn Follow-Up & Coreference Resolution Engine
-  // 5A: "in mai se sasta kaun sa hai?" / "inme se sasta" / "in mein se" / "sab se sasta"
-  const isCheapestInContextQuery =
-    /\b(?:in\s*mai\s*se|in\s*mein\s*se|in\s*me\s*se|in\s*main\s*se|in\s*se|un\s*mai\s*se|un\s*mein\s*se)\b/i.test(lower) ||
-    (/\b(?:sab\s*se\s*sasta|sab\s*se\s*sasti|sab\s*se\s*kam|cheapest|lowest|is\s*se\s*sasta)\b/i.test(lower) && Boolean(state?.activeBrand || state?.lastPitchedDeals?.length));
+  // BRANCH 7: Brand Disambiguation: Diners (Menswear) vs Dinner (Food)
+  if (parsed.primaryBrand === 'Diners') {
+    const reply =
+      "Janab, agar aap Diners (menswear brand) ki baat kar rahe hain to filhal Diners hamare platform par registered nahi hai, magar men's fashion aur kapron par hamare registered brands Khaadi aur Outfitters par 40% se 50% tak flat discount available hai!\n\nAur agar aap shaam ke Dinner (fast food ya pizza) ki deal dhoondh rahe hain to Cheezious par 30% OFF pizza combos live hain.\n\nBatayein Janab, aapko men's fashion deals dekhni hain ya dinner fast food ki posts dikhaoon?";
 
-  if (isCheapestInContextQuery) {
+    const fashionDeals = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      return bName.includes('outfitter') || bName.includes('khaadi');
+    });
+
+    return {
+      reply,
+      deals: parsed.isExplicitShow ? fashionDeals.slice(0, 3) : [],
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👕 Men\'s Fashion Deals Dikhao',
+        '🍕 Cheezious Pizza Dikhao',
+        '👗 Khaadi Deals Dikhao',
+      ],
+    };
+  }
+
+  // BRANCH 8: Coreference Resolution Engine (Multi-Turn Pronouns)
+  // 8A: "in mai se sasta kaun sa hai?" / "sab se sasta"
+  const isCheapestQuery =
+    /\b(?:in\s*mai\s*se|in\s*mein\s*se|in\s*me\s*se|in\s*se|un\s*mai\s*se|un\s*mein\s*se)\b/i.test(lower) ||
+    (/\b(?:sab\s*se\s*sasta|sab\s*se\s*sasti|sab\s*se\s*kam|cheapest|lowest|is\s*se\s*sasta)\b/i.test(lower) &&
+      Boolean(state?.activeBrand || (state?.lastPitchedDeals && state.lastPitchedDeals.length > 0)));
+
+  if (isCheapestQuery) {
     let candidateDeals: Deal[] = [];
     if (state?.lastPitchedDeals && state.lastPitchedDeals.length > 0) {
       candidateDeals = state.lastPitchedDeals;
@@ -518,7 +801,7 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // 5B: "unke hi dikha do" / "unhi ke dikhao" / "unke dikhao" / "wohi dikhao"
+  // 8B: "unke hi dikha do" / "unhi ke dikhao"
   const isAlternativePronounQuery =
     /\b(?:unke\s*hi|unhi\s*ke|unke\s*dikha|unka\s*dikha|un\s*ke\s*posts|unke\s*deals|wohi\s*dikha|unhi\s*par|unke\s*hi\s*dikha\s*do|acha\s*unke)\b/i.test(
       lower
@@ -554,7 +837,7 @@ function runDeterministicBachatSearch(
     };
   }
 
-  // 5C: Cross-Selling / Matching (e.g. "matching shoes", "matching jootay", "matching chappal")
+  // 8C: Cross-Selling / Matching (e.g. "matching shoes")
   const isMatchingQuery = /\b(?:match|matching|sath\s*ke|sath\s*wali)\b/i.test(lower);
   if (
     isMatchingQuery &&
@@ -572,8 +855,7 @@ function runDeterministicBachatSearch(
 
     if (shoeDeals.length > 0) {
       const brandContext = state?.activeBrand ? `${state.activeBrand} ke dresses` : 'aapke outfits';
-      const audienceContext = state?.targetAudience === 'ladies' ? 'ladies' : '';
-      const reply = `Zabardast choice Janab! ${brandContext} ke sath match karne ke liye Bata par yeh ${audienceContext} footwear deals live hain jahan flat discount mil raha hai:`;
+      const reply = `Zabardast choice Janab! ${brandContext} ke sath match karne ke liye Bata par yeh footwear deals live hain jahan flat discount mil raha hai:`;
 
       return {
         reply,
@@ -589,84 +871,50 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // 5D: Category Query with Memory Budget (e.g. "shoes dikhao" or "kapray dikhao" when budget is already stored in state)
-  const isCategoryQueryWithShow =
-    /\b(?:shoe|shoes|joot|jootay|sneaker|kapr|kapray|lawn|kurti|dress|suit|food|pizza|burger|phone|mobile)\b/i.test(
-      lower
-    ) && /\b(?:dikhao|dikhayein|dikha|show|posts|cards|deals)\b/i.test(lower);
-
-  if (isCategoryQueryWithShow && state?.activeBudget && !lower.match(/\d{3,6}/)) {
-    const maxBudget = state.activeBudget;
-    let filteredDeals = liveDeals.filter((d) => {
-      const price =
-        d.discount_price ||
-        (d as any).price ||
-        (d.original_price && d.discount_pct
-          ? Math.round(d.original_price * (1 - d.discount_pct / 100))
-          : 0);
-      return price > 0 && price <= maxBudget;
+  // BRANCH 9: Exact Brand Mention (Khaadi, Outfitters, Bata, PriceOye, Cheezious, Gul Ahmed, etc.)
+  if (parsed.primaryBrand && parsed.primaryBrand !== 'Diners') {
+    const brandName = parsed.primaryBrand;
+    const brandMatches = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      return bName.includes(brandName.toLowerCase().split(' ')[0]) || title.includes(brandName.toLowerCase().split(' ')[0]);
     });
 
-    if (lower.includes('shoe') || lower.includes('joot') || lower.includes('sneaker')) {
-      filteredDeals = filteredDeals.filter((d) => {
-        const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-        const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-        return cat.includes('footwear') || bName.includes('bata');
-      });
-    } else if (lower.includes('kapr') || lower.includes('lawn') || lower.includes('kurti')) {
-      filteredDeals = filteredDeals.filter((d) => {
-        const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-        const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-        return cat.includes('fashion') || bName.includes('khaadi') || bName.includes('outfitter');
-      });
-    }
+    if (brandMatches.length > 0) {
+      const topDeal = brandMatches[0];
+      const origPrice = topDeal.original_price || 0;
+      const discPrice =
+        topDeal.discount_price ||
+        (origPrice && topDeal.discount_pct
+          ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
+          : origPrice);
+      const savings = origPrice > discPrice ? origPrice - discPrice : 0;
+      const savingsNote =
+        savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
 
-    if (filteredDeals.length > 0) {
-      const reply = `Zaroor Janab! Aapke pehle bataye gaye Rs. ${maxBudget.toLocaleString()} ke budget ke mutabiq yeh sab se behtareen verified deals hain jahan aap ke mazeed hazaron rupay bach rahe hain:`;
-      return {
-        reply,
-        deals: filteredDeals.slice(0, 4),
-        is_off_topic: false,
-        language: 'roman_urdu',
-        suggested_chips: [
-          '⚡ Claim Deal',
-          '💰 Aur Sasta Dikhao',
-          '🔥 50%+ OFF Flash Deals',
-        ],
-      };
-    } else {
-      // Find closest deals in category even if slightly above budget
-      const categoryDeals = liveDeals.filter((d) => {
-        const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-        const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-        if (lower.includes('shoe') || lower.includes('joot') || lower.includes('sneaker')) {
-          return cat.includes('footwear') || bName.includes('bata');
-        }
-        if (lower.includes('kapr') || lower.includes('lawn') || lower.includes('kurti')) {
-          return cat.includes('fashion') || bName.includes('khaadi') || bName.includes('outfitter');
-        }
-        return false;
-      });
-
-      if (categoryDeals.length > 0) {
-        const topDeal = categoryDeals[0];
-        const origP = topDeal.original_price || 0;
-        const p =
-          topDeal.discount_price ||
-          (origP && topDeal.discount_pct
-            ? Math.round(origP * (1 - topDeal.discount_pct / 100))
-            : origP);
-        const diff = p - maxBudget;
-        const diffNote = diff > 0 ? ` (sirf Rs. ${diff.toLocaleString()} ka farq hai)` : '';
-        const reply = `Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget ke qareeb tareen Bata par yeh verified footwear deal live hai jahan Rs. ${p.toLocaleString()} mein 40% discount mil raha hai${diffNote}:`;
+      if (parsed.isExplicitShow) {
+        const reply = `Janab! ${brandName} par is waqt zabardast verified deals active hain! Sab se top deal "${topDeal.title}" par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Limited stock hai, aap direct card se claim kar sakte hain:`;
         return {
           reply,
-          deals: categoryDeals.slice(0, 3),
+          deals: brandMatches.slice(0, 5),
           is_off_topic: false,
           language: 'roman_urdu',
           suggested_chips: [
+            '💰 Is se sasta alternative',
+            '🔥 50%+ OFF Flash Deals',
             '⚡ Claim Deal',
-            '💰 Aur Sasta Dikhao',
+          ],
+        };
+      } else {
+        const reply = `Janab! ${brandName} par is waqt zabardast verified offers chal rahi hain jahan ${topDeal.discount_pct}% tak flat discount mil raha hai${savingsNote}!\n\nKya main aapko ${brandName} ki deals aur posts dikhaoon?`;
+        return {
+          reply,
+          deals: [],
+          is_off_topic: false,
+          language: 'roman_urdu',
+          suggested_chips: [
+            `👗 ${brandName} Deals Dikhao`,
+            '💰 Is se sasta alternative',
             '🔥 50%+ OFF Flash Deals',
           ],
         };
@@ -674,183 +922,10 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // 6. Needs Discovery & Broad Shopping Guidance (e.g. "madad kro meri shopping krnay mai")
-  const isGuidanceOrHelpQuery =
-    /\b(?:madad|help|guide|guidance|mashwara|mashwarah|suggest|suggestion|recommend|recommendation|shopping\s*krnay|shopping\s*karni|samajh\s*nahi\s*aa\s*raha|kya\s*khareedon|kya\s*loon|kuch\s*batao|kahan\s*se\s*shuru)\b/i.test(
-      lower
-    ) ||
-    /madad\s*kro|shopping\s*krnay\s*mai|shopping\s*karne\s*mein|shopping\s*guide/i.test(lower);
-
-  if (isGuidanceOrHelpQuery) {
-    const reply =
-      'Hukam karein Janab! Main aapki shopping mein madad karne aur aapke hazaron rupay bachane ke liye hi hazir hoon! 🛍️\n\nSir, aap aaj kis tarah ke product mein dilchaspi rakhte hain?\n• 👗 Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed)\n• 👟 Footwear & Jootay (Bata Pakistan)\n• 📱 Mobiles & Electronics (PriceOye)\n• 🍕 Dinners & Fast Food (Cheezious)\n\nAur shopping ke liye aap ka target budget kitna zehan mein hai? Neechay diye gaye options par tap karein ya mujhe batayein:';
-
-    return {
-      reply,
-      deals: [], // NO BLIND POST DUMPING! True consultative discovery
-      is_off_topic: false,
-      language: 'roman_urdu',
-      suggested_chips: [
-        '👗 Kapray & Lawn',
-        '👟 Branded Shoes',
-        '🍕 Dinners & Food',
-        '📱 Phones & Tech',
-        '🎯 Rs. 3,000 Budget',
-      ],
-    };
-  }
-
-  // 4. Ambiguity Counter-Questioning (e.g. "kuch acha dikhao", "kuch sasta", "gift chahiye")
-  const isAmbiguousBroadQuery =
-    /\b(?:kuch\s*acha|kuch\s*bhi|acha\s*sa|gift\s*lena|gift\s*chahiye|best\s*cheez|top\s*cheez|sab\s*se\s*acha)\b/i.test(
-      lower
-    ) &&
-    !/khaadi|outfitters|bata|cheezious|priceoye|saeed|lawn|shoe|pizza|phone|dinner/i.test(lower);
-
-  if (isAmbiguousBroadQuery) {
-    const reply =
-      'Zaroor Janab! Behtareen recommendations nikaal deta hoon jahan sab se bari bachat ho rahi hai. Sir, thora wazeh farmayein:\n1. Yeh shopping ladies ke liye hai ya gents ke liye?\n2. Aap naye kapray, jootay, gadgets ya dinner deal dhoondh rahe hain?\n3. Aur target budget kitna zehan mein hai?';
-
-    return {
-      reply,
-      deals: [],
-      is_off_topic: false,
-      language: 'roman_urdu',
-      suggested_chips: [
-        '👗 Ladies Lawn & Kurtis',
-        '👕 Gents Casual Wear',
-        '👟 Bata Footwear',
-        '📱 Tech Deals',
-        '💰 Under Rs. 4,000',
-      ],
-    };
-  }
-
-  // 2. Specific Brand Name Mentions (Exact Brand Pitching)
-  const isKhaadi = /khaadi/i.test(lower);
-  const isOutfitters = /outfitter/i.test(lower);
-  const isGulAhmed = /gul\s*ahmed|gulahmed/i.test(lower);
-  const isBata = /bata/i.test(lower);
-  const isCheezious = /cheezious/i.test(lower);
-  const isPriceOye = /price\s*oye|priceoye/i.test(lower);
-  const isSaeedGhani = /saeed\s*ghani|saeedghani/i.test(lower);
-  const isImtiaz = /imtiaz/i.test(lower);
-  const isHabitt = /habitt/i.test(lower);
-
-  let brandMatches: Deal[] = [];
-  let brandPitchedName = '';
-
-  if (isKhaadi) {
-    brandPitchedName = 'Khaadi';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('khaadi') || title.includes('khaadi');
-    });
-  } else if (isOutfitters) {
-    brandPitchedName = 'Outfitters';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('outfitter') || title.includes('outfitter');
-    });
-  } else if (isGulAhmed) {
-    brandPitchedName = 'Gul Ahmed';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('gul') || bName.includes('ahmed') || title.includes('gul ahmed');
-    });
-  } else if (isBata) {
-    brandPitchedName = 'Bata Pakistan';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('bata') || title.includes('bata');
-    });
-  } else if (isCheezious) {
-    brandPitchedName = 'Cheezious';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('cheezious') || title.includes('cheezious');
-    });
-  } else if (isPriceOye) {
-    brandPitchedName = 'PriceOye';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('priceoye') || title.includes('priceoye');
-    });
-  } else if (isSaeedGhani) {
-    brandPitchedName = 'Saeed Ghani';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return bName.includes('saeed') || bName.includes('ghani') || title.includes('saeed ghani');
-    });
-  } else if (isImtiaz) {
-    brandPitchedName = 'Imtiaz Super Market';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      return bName.includes('imtiaz');
-    });
-  } else if (isHabitt) {
-    brandPitchedName = 'Habitt';
-    brandMatches = liveDeals.filter((d) => {
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      return bName.includes('habitt');
-    });
-  }
-
-  if (brandMatches.length > 0) {
-    const topDeal = brandMatches[0];
-    const origPrice = topDeal.original_price || 0;
-    const discPrice =
-      topDeal.discount_price ||
-      (origPrice && topDeal.discount_pct
-        ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-        : origPrice);
-    const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-    const savingsNote =
-      savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-    const reply =
-      language === 'roman_urdu'
-        ? `Janab! ${brandPitchedName} par is waqt zabardast offers chal rahi hain! Sab se top deal "${topDeal.title}" par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Stock bohot tezi se nikal raha hai, yeh dekhein ${brandPitchedName} ki active verified deals:`
-        : `Great news Janab! ${brandPitchedName} currently has verified active sales with up to ${topDeal.discount_pct}% OFF${savingsNote}. Here are the top deals from ${brandPitchedName}:`;
-
-    let brandChips = [
-      '💰 Is se sasta alternative',
-      '🔥 50%+ OFF Flash Deals',
-      '⚡ Claim Deal',
-    ];
-    if (isKhaadi || isOutfitters || isGulAhmed) {
-      brandChips = ['👟 Matching Bata Shoes', '💰 Is se sasta alternative', '🔥 50%+ OFF Flash Deals'];
-    } else if (isCheezious) {
-      brandChips = ['🥤 Wings & Drinks Combo', '🍔 Fast Food Alternative', '🛵 Delivery Info'];
-    } else if (isBata) {
-      brandChips = ['👗 Matching Khaadi Kurti', '👟 Casual Sneakers', '💰 Under Rs. 2,000'];
-    }
-
-    return {
-      reply,
-      deals: brandMatches.slice(0, 5),
-      is_off_topic: false,
-      language,
-      suggested_chips: brandChips,
-    };
-  }
-
-  // 3. Budget Query
-  const budgetMatch =
-    lower.match(/(?:budget|range|under|andar|tak|mein)(?:[^\d]{1,15})?(\d{3,6})/i) ||
-    lower.match(/(\d{3,6})(?:[^\d]{1,15})?(?:budget|ke\s*andar|tak)/i) ||
-    lower.match(/(?:rs\.?|pkr)\s*(\d{3,6})/i);
-
-  if (budgetMatch) {
-    const maxBudget = parseInt(budgetMatch[1], 10);
-    const affordableDeals = liveDeals.filter((d) => {
+  // BRANCH 10: Budget Range Search
+  if (parsed.budgetConstraint) {
+    const maxBudget = parsed.budgetConstraint;
+    let affordableDeals = liveDeals.filter((d) => {
       const price =
         d.discount_price ||
         (d as any).price ||
@@ -859,6 +934,13 @@ function runDeterministicBachatSearch(
           : 0);
       return price > 0 && price <= maxBudget;
     });
+
+    if (parsed.primaryCategory) {
+      affordableDeals = affordableDeals.filter((d) => {
+        const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
+        return cat.includes(parsed.primaryCategory!);
+      });
+    }
 
     if (affordableDeals.length > 0) {
       const topPick = affordableDeals[0];
@@ -871,112 +953,51 @@ function runDeterministicBachatSearch(
       const savings = (topPick.original_price || topPrice) - topPrice;
       const brandName = (topPick as any).brand?.name || 'Brand';
 
-      const reply =
-        language === 'roman_urdu'
-          ? `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein main ne top verified deals nikali hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (aur seedha Rs. ${savings.toLocaleString()} ki bachat ho rahi hai!). Stock limited hai, neechay diye gaye card se foran claim karein:`
-          : `Don't worry Janab! Within your Rs. ${maxBudget.toLocaleString()} budget, I hand-picked the best deals. Top recommendation is "${topPick.title}" from ${brandName} at only Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Limited stock, claim below:`;
-
-      return {
-        reply,
-        deals: affordableDeals.slice(0, 5),
-        is_off_topic: false,
-        language,
-        suggested_chips: [
-          '👗 Outfits in Budget',
-          '👟 Shoes in Budget',
-          '🍕 Food in Budget',
-          '💡 Sasta Alternative',
-        ],
-      };
+      if (parsed.isExplicitShow) {
+        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein top verified deals yeh hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (seedha Rs. ${savings.toLocaleString()} ki bachat!). Neechay diye gaye cards se foran claim karein:`;
+        return {
+          reply,
+          deals: affordableDeals.slice(0, 5),
+          is_off_topic: false,
+          language: 'roman_urdu',
+          suggested_chips: [
+            '⚡ Claim Deal',
+            '💰 Aur Sasta Dikhao',
+            '🔥 50%+ OFF Deals',
+          ],
+        };
+      } else {
+        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein ${brandName} aur hamare verified brand partners par behtareen options mojood hain jahan sirf Rs. ${topPrice.toLocaleString()} mein Rs. ${savings.toLocaleString()} ki direct bachat mil rahi hai!\n\nKya main aapko is budget ki deals aur posts dikhaoon?`;
+        return {
+          reply,
+          deals: [],
+          is_off_topic: false,
+          language: 'roman_urdu',
+          suggested_chips: [
+            `💰 Rs. ${maxBudget.toLocaleString()} Deals Dikhao`,
+            '👗 Fashion in Budget',
+            '👟 Shoes in Budget',
+          ],
+        };
+      }
     }
   }
 
-  // 4. Sasta / Mehnga / Objection Handling
-  const isCheapOrObjection = /sasta|kam budget|mehnga|discount zyada|chhoot|sasti|alternative/i.test(lower);
-  if (isCheapOrObjection) {
-    const sortedCheapest = [...liveDeals].sort((a, b) => {
-      const pA =
-        a.discount_price ||
-        (a.original_price ? Math.round(a.original_price * (1 - (a.discount_pct || 0) / 100)) : 999999);
-      const pB =
-        b.discount_price ||
-        (b.original_price ? Math.round(b.original_price * (1 - (b.discount_pct || 0) / 100)) : 999999);
-      return pA - pB;
-    });
-    const topCheap = sortedCheapest.slice(0, 4);
-    const reply =
-      language === 'roman_urdu'
-        ? `Befikar rahein! Ek acha salesman hamesha customer ke paisay bachata hai. Yeh dekhein hamari sab se sasti aur high-value verified deals jahan qimat intehai munasib hai aur bachat zabardast hai:`
-        : `No worries Janab! A great personal shopper always watches your wallet. Here are our lowest-price, maximum-value verified deals right now:`;
-    return { reply, deals: topCheap, is_off_topic: false, language };
-  }
-
-  // 5. Discount Percentage Query
-  const pctMatch = lower.match(/(\d{1,2})\s*%/);
-  if (pctMatch) {
-    const requestedPct = parseInt(pctMatch[1], 10);
-    const highDiscountDeals = liveDeals.filter((d) => (d.discount_pct || 0) >= requestedPct);
-
-    if (highDiscountDeals.length > 0) {
-      const reply =
-        language === 'roman_urdu'
-          ? `Zabardast choice! Mujhe aapke liye ${requestedPct}% ya is se zyada discount wali ${highDiscountDeals.length} dhamaka deals mili hain! Yeh limited time offers hain, neechay diye gaye cards se direct claim karein:`
-          : `Excellent choice! I found ${highDiscountDeals.length} active verified deals offering ${requestedPct}% or more discount! These are limited-time offers, claim below:`;
-      return { reply, deals: highDiscountDeals.slice(0, 5), is_off_topic: false, language };
-    }
-  }
-
-  // 6. Category Direct Matchers (Deep Pakistani Retail Synonyms)
-  const isFood =
-    /\b(?:food|foods|burger|burgers|pizza|pizzas|khana|khane|biryani|dine|dining|dinner|dinners|lunch|breakfast|fast\s*food|shawarma|karahi|roll|rolls|wings|combo|meal|meals|restaurant|restaurants)\b/i.test(
-      lower
-    ) || /dinner|dinners|pizza/i.test(lower);
-
-  const isFashion =
-    /\b(?:kapr|kapray|kapron|lawn|kurti|kurtis|dress|dresses|suit|suits|shirt|shirts|pant|pants|fashion|cloth|clothes|clothing|pret|unstitched|streetwear)\b/i.test(
-      lower
-    );
-
-  const isFootwear =
-    /\b(?:shoe|shoes|joot|jootay|jooton|sneaker|sneakers|chappal|chappals|sandal|sandals|boot|boots|jogger|joggers|footwear)\b/i.test(
-      lower
-    );
-
-  const isElectronics =
-    /\b(?:mobile|mobiles|phone|phones|smartphone|smartphones|laptop|laptops|electronics|tech|watch|watches|gadget|gadgets|earbud|earbuds|airpod|airpods|redmi)\b/i.test(
-      lower
-    );
-
-  const isBeauty =
-    /\b(?:beauty|makeup|skin|skincare|perfume|perfumes|cosmetic|cosmetics|serum|rose\s*water|arq-e-gulab|hair\s*oil|cream)\b/i.test(
-      lower
-    );
-
-  const isGrocery =
-    /\b(?:grocery|groceries|rashan|supermarket|oil|ghee|atta|sugar|chawal|rice|masala|daal)\b/i.test(
-      lower
-    );
-
-  const isHome =
-    /\b(?:furniture|bed|beds|bedsheet|bedsheets|sofa|sofas|cushion|cushions|decor|curtain|curtains|living)\b/i.test(
-      lower
-    );
-
-  if (isFood) {
-    const foodDeals = liveDeals.filter((d) => {
+  // BRANCH 11: Specific Category Searches (Fashion, Footwear, Electronics, Food, Beauty, Grocery, Home)
+  if (parsed.primaryCategory) {
+    const catDeals = liveDeals.filter((d) => {
       const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
       const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
       const title = (d.title || '').toLowerCase();
       return (
-        cat.includes('food') ||
-        cat.includes('dining') ||
-        bName.includes('cheezious') ||
-        /pizza|burger|wings|combo|meal|crust/i.test(title)
+        cat.includes(parsed.primaryCategory!) ||
+        bName.includes(parsed.primaryCategory!) ||
+        title.includes(parsed.primaryCategory!)
       );
     });
 
-    if (foodDeals.length > 0) {
-      const topDeal = foodDeals[0];
+    if (catDeals.length > 0) {
+      const topDeal = catDeals[0];
       const origPrice = topDeal.original_price || 0;
       const discPrice =
         topDeal.discount_price ||
@@ -987,245 +1008,45 @@ function runDeterministicBachatSearch(
       const savingsNote =
         savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
 
-      const reply =
-        language === 'roman_urdu'
-          ? `Bhook lagi hai Janab? Cheezious aur hamare verified food partners par dinner, fast food aur pizza combos par 30% tak discount chal raha hai — khana lazeez aur bachat zabardast! Top deal par ${topDeal.discount_pct}% discount chal raha hai${savingsNote}. Yeh dekhein active food & dinner deals:`
-          : `Hungry Janab? Cheezious and food partners have special 30% discount combos live right now${savingsNote}! Here are the active dinner and food deals:`;
-
-      return {
-        reply,
-        deals: foodDeals.slice(0, 5),
-        is_off_topic: false,
-        language,
-        suggested_chips: [
-          '🥤 Wings & Drinks Combo',
-          '🍔 Burger Deals',
-          '💰 Under Rs. 1,500',
-          '🛵 Fast Delivery',
-        ],
-      };
+      if (parsed.isExplicitShow) {
+        const reply = `Janab! Yeh dekhein active verified deals jahan top deal par ${topDeal.discount_pct || 0}% discount chal raha hai${savingsNote}. Limited stock hai, foran claim karein:`;
+        return {
+          reply,
+          deals: catDeals.slice(0, 5),
+          is_off_topic: false,
+          language: 'roman_urdu',
+          suggested_chips: [
+            '⚡ Claim Deal',
+            '💰 Aur Sasta Dikhao',
+            '🔥 50%+ OFF Flash Deals',
+          ],
+        };
+      } else {
+        const reply = `Janab! Is category mein hamare verified registered brands par ${topDeal.discount_pct || 0}% tak direct discount chal raha hai${savingsNote}.\n\nKya main aapko iski active deals aur posts dikhaoon?`;
+        return {
+          reply,
+          deals: [],
+          is_off_topic: false,
+          language: 'roman_urdu',
+          suggested_chips: [
+            '👗 Deals Dikhao',
+            '💰 Under Rs. 3,000',
+            '🔥 Flash Sale Dikhao',
+          ],
+        };
+      }
     }
   }
 
-  if (isFashion) {
-    const fashionDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return (
-        cat.includes('fashion') ||
-        bName.includes('khaadi') ||
-        bName.includes('outfitter') ||
-        bName.includes('gul') ||
-        /lawn|kurti|suit|unstitched|pret|streetwear/i.test(title)
-      );
-    });
+  // BRANCH 12: General Fallback for Shopping Inquiries
+  if (parsed.hasShoppingIntent) {
+    const fallbackReply = parsed.isExplicitShow
+      ? 'Janab! Hamare registered official brand partners par yeh garam offers chal rahi hain jahan aap ke hazaron rupay bach sakte hain. Neechay diye gaye cards dekhein:'
+      : 'Janab! Hamare registered official brand partners par is waqt 30% se 70% tak zabardast discounts chal rahe hain. Batayein Janab, aapko kapray, jootay, mobile ya food ki posts dikhaoon?';
 
-    if (fashionDeals.length > 0) {
-      const topDeal = fashionDeals[0];
-      const origPrice = topDeal.original_price || 0;
-      const discPrice =
-        topDeal.discount_price ||
-        (origPrice && topDeal.discount_pct
-          ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-          : origPrice);
-      const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-      const savingsNote =
-        savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-      const reply =
-        language === 'roman_urdu'
-          ? `Wah Janab! Kapron aur lawn collection par is waqt Jumble Sale par sab se bari bachat chal rahi hai! Khaadi, Outfitters aur Gul Ahmed par 30% se 50% tak flat discount mil raha hai${savingsNote}. Yeh dekhein top verified fashion deals:`
-          : `Superb choice Janab! We have massive sales on lawn, pret and apparel today with up to 50% OFF${savingsNote}. Here are the top verified fashion deals:`;
-
-      return {
-        reply,
-        deals: fashionDeals.slice(0, 5),
-        is_off_topic: false,
-        language,
-        suggested_chips: [
-          '👟 Matching Bata Shoes',
-          '👗 Khaadi Flat 50%',
-          '👕 Outfitters Streetwear',
-          '💰 Under Rs. 3,000',
-        ],
-      };
-    }
-  }
-
-  if (isFootwear) {
-    const shoeDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return (
-        cat.includes('footwear') ||
-        bName.includes('bata') ||
-        /shoe|sneaker|sandal|chappal|boot/i.test(title)
-      );
-    });
-
-    if (shoeDeals.length > 0) {
-      const topDeal = shoeDeals[0];
-      const origPrice = topDeal.original_price || 0;
-      const discPrice =
-        topDeal.discount_price ||
-        (origPrice && topDeal.discount_pct
-          ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-          : origPrice);
-      const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-      const savingsNote =
-        savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-      const reply =
-        language === 'roman_urdu'
-          ? `Zabardast choice Janab! Jooton aur sneakers par Bata aur top footwear brands ne qeematein aadhi kar di hain, jahan seedha Rs. 1,000+ ki bachat mil rahi hai${savingsNote}. Yeh dekhein top footwear deals:`
-          : `Great taste Janab! Bata and top footwear brands are offering huge markdowns right now${savingsNote}. Here are the verified shoe deals:`;
-
-      return {
-        reply,
-        deals: shoeDeals.slice(0, 5),
-        is_off_topic: false,
-        language,
-        suggested_chips: [
-          '👗 Matching Outfits',
-          '👟 Bata Casual Sneakers',
-          '👠 Formal Khussa / Heels',
-          '💰 Under Rs. 2,000',
-        ],
-      };
-    }
-  }
-
-  if (isElectronics) {
-    const techDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return (
-        cat.includes('electronics') ||
-        bName.includes('priceoye') ||
-        /phone|mobile|redmi|earbud|airpod|laptop/i.test(title)
-      );
-    });
-
-    if (techDeals.length > 0) {
-      const topDeal = techDeals[0];
-      const origPrice = topDeal.original_price || 0;
-      const discPrice =
-        topDeal.discount_price ||
-        (origPrice && topDeal.discount_pct
-          ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-          : origPrice);
-      const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-      const savingsNote =
-        savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-      const reply =
-        language === 'roman_urdu'
-          ? `Tech aur gadget lovers ke liye khushkhabri! PriceOye aur top electronics par verified official warranty ke sath dhamaka sale chal rahi hai${savingsNote}. Yeh dekhein sab se saste tech deals:`
-          : `Smart thinking Janab! PriceOye and electronics partners are offering massive markdowns with official warranty${savingsNote}. Here are the top tech deals:`;
-
-      return { reply, deals: techDeals.slice(0, 5), is_off_topic: false, language };
-    }
-  }
-
-  if (isBeauty) {
-    const beautyDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      const title = (d.title || '').toLowerCase();
-      return (
-        cat.includes('beauty') ||
-        bName.includes('saeed') ||
-        /rose water|skincare|serum|cream|hair oil/i.test(title)
-      );
-    });
-
-    if (beautyDeals.length > 0) {
-      const topDeal = beautyDeals[0];
-      const origPrice = topDeal.original_price || 0;
-      const discPrice =
-        topDeal.discount_price ||
-        (origPrice && topDeal.discount_pct
-          ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-          : origPrice);
-      const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-      const savingsNote =
-        savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-      const reply =
-        language === 'roman_urdu'
-          ? `Self-care aur cosmetics par Saeed Ghani aur top brands par direct bachat mil rahi hai! 100% natural aur certified products par special discounts dekhein${savingsNote}:`
-          : `Self-care time Janab! Saeed Ghani and beauty brands are running limited-time markdowns${savingsNote}. Here are the top beauty deals:`;
-
-      return { reply, deals: beautyDeals.slice(0, 5), is_off_topic: false, language };
-    }
-  }
-
-  if (isGrocery) {
-    const groceryDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      return cat.includes('grocery') || bName.includes('imtiaz');
-    });
-
-    if (groceryDeals.length > 0) {
-      const reply =
-        language === 'roman_urdu'
-          ? 'Ghar ke rashan aur daily grocery par Imtiaz Super Market par monthly bachat deals chal rahi hain. Yeh dekhein live grocery savings:'
-          : 'Daily essentials Janab! Imtiaz Super Market has live supermarket savings:';
-      return { reply, deals: groceryDeals.slice(0, 5), is_off_topic: false, language };
-    }
-  }
-
-  if (isHome) {
-    const homeDeals = liveDeals.filter((d) => {
-      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
-      return cat.includes('home') || bName.includes('habitt');
-    });
-
-    if (homeDeals.length > 0) {
-      const reply =
-        language === 'roman_urdu'
-          ? 'Home decor aur furniture par Habitt aur home partners par exclusive bachat discounts chal rahe hain. Yeh dekhein active home deals:'
-          : 'Home & living deals Janab! Check out Habitt furniture and decor discounts:';
-      return { reply, deals: homeDeals.slice(0, 5), is_off_topic: false, language };
-    }
-  }
-
-  // 7. General Tokenized Search
-  const words = lower.split(/\s+/).filter(w => w.length > 2 && !['ki', 'ka', 'ke', 'ko', 'se', 'deals', 'deal', 'sale', 'btana', 'batao', 'btao', 'hai', 'hain', 'orr', 'aur'].includes(w));
-  const tokenMatches = liveDeals.filter(d => {
-    const title = (d.title || '').toLowerCase();
-    const desc = (d.description || '').toLowerCase();
-    const bName = ((d as any).brand?.name || '').toLowerCase();
-    const catName = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
-    return words.some(w => title.includes(w) || desc.includes(w) || bName.includes(w) || catName.includes(w));
-  });
-
-  if (tokenMatches.length > 0) {
-    const topDeal = tokenMatches[0];
-    const origPrice = topDeal?.original_price || 0;
-    const discPrice =
-      topDeal?.discount_price ||
-      (origPrice && topDeal?.discount_pct
-        ? Math.round(origPrice * (1 - topDeal.discount_pct / 100))
-        : origPrice);
-    const savings = origPrice > discPrice ? origPrice - discPrice : 0;
-    const savingsNote =
-      savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
-
-    const reply =
-      language === 'roman_urdu'
-        ? `Janab! Hamare registered brand partners par yeh sab se sasti aur zabardast deals chal rahi hain! Top deal par ${topDeal?.discount_pct || 0}% discount chal raha hai${savingsNote}. Limited stock hai, foran claim karein:`
-        : `Janab! Our registered brand partners have these high-value savings live right now! The top deal offers ${topDeal?.discount_pct || 0}% OFF${savingsNote}. Limited stock, check them out:`;
-
-    const isExplicitShow = /\b(?:dikhao|dikhayein|dikha|dekhao|dekhein|show|posts|cards|deals|deal|sale|offer)\b/i.test(lower);
     return {
-      reply,
-      deals: isExplicitShow ? tokenMatches.slice(0, 5) : [],
+      reply: fallbackReply,
+      deals: parsed.isExplicitShow ? liveDeals.slice(0, 4) : [],
       is_off_topic: false,
       language,
       suggested_chips: [
@@ -1237,44 +1058,18 @@ function runDeterministicBachatSearch(
     };
   }
 
-  // Honest Salesman Fallback (when no specific item was found in database)
-  const shoppingIntentKeywords = /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|coupons|voucher|vouchers|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim)\b/i;
-  const hasShoppingIntent = shoppingIntentKeywords.test(lower);
-
-  if (!hasShoppingIntent) {
-    // If no deals matched and user didn't even mention shopping words, it is out of syllabus!
-    const refusal =
-      "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par discount dekhna hai?";
-    return {
-      reply: refusal,
-      deals: [],
-      is_off_topic: true,
-      language: 'roman_urdu',
-      suggested_chips: [
-        '👗 Khaadi Deals Dikhao',
-        '🍕 Cheezious Pizza Dikhao',
-        '👟 Bata Shoes Dikhao',
-        '🎯 Rs. 3,000 Budget Deals',
-      ],
-    };
-  }
-
-  const fallbackReply =
-    language === 'roman_urdu'
-      ? 'Janab! Filhal is mutalliq specific verified deal active nahi hai, magar hamare registered brand partners par yeh garam offers chal rahi hain jahan aap ke hazaron rupay bach sakte hain. Batayein Janab, aapko kis brand ya category ki posts dikhaoon?'
-      : 'Janab! While we do not have an active deal matching that exact item right now, our registered brand partners have exciting high-value offers today. Which category posts would you like me to show?';
-
-  const isExplicitShow = /\b(?:dikhao|dikhayein|dikha|dekhao|dekhein|show|posts|cards)\b/i.test(lower);
+  // Default: Strict Off-Topic Refusal
   return {
-    reply: fallbackReply,
-    deals: isExplicitShow ? liveDeals.slice(0, 4) : [],
-    is_off_topic: false,
-    language,
+    reply:
+      "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?",
+    deals: [],
+    is_off_topic: true,
+    language: 'roman_urdu',
     suggested_chips: [
-      '👗 Khaadi Deals Dikhao',
-      '🍕 Cheezious Pizza Dikhao',
-      '👟 Bata Shoes Dikhao',
-      '📱 Mobile Deals Dikhao',
+      '👗 Khaadi & Gul Ahmed Sale',
+      '🍕 Cheezious Pizza Combos',
+      '👟 Bata Shoes 50% Off',
+      '🎯 Rs. 3,000 Budget Deals',
     ],
   };
 }
@@ -1284,13 +1079,15 @@ export async function askJumbleBachatAssistant(
   chatHistory: { role: string; content: string; deals?: Deal[] }[] = []
 ): Promise<AssistantResponse> {
   const query = (userQuery || '').trim();
-  const lower = query.toLowerCase();
 
-  // 1. Fetch REAL active live deals directly from database
+  // 1. Fetch REAL active live deals directly from platform store
   const liveDeals = await getLiveDatabaseDealsForAI();
 
   // 2. Extract Multi-Turn Conversation Memory State
   const state = extractConversationState(chatHistory, liveDeals);
+
+  // 3. Deep Full-Sentence Parsing Across All 8 Retail & Support Domains
+  const parsed = parseFullSentence(query, state);
 
   // Detect language
   const urduMarkers = [
@@ -1303,28 +1100,11 @@ export async function askJumbleBachatAssistant(
     'salam', 'assalam', 'aslamu', 'alaikum', 'aoa', 'hey', 'hello', 'hi',
     'dinners', 'dinner', 'orr', 'aur', 'kuch', 'bata'
   ];
-  const isRomanUrdu = urduMarkers.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(lower));
+  const isRomanUrdu = urduMarkers.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(parsed.normalized));
   const language: 'roman_urdu' | 'english' = isRomanUrdu ? 'roman_urdu' : 'roman_urdu';
 
-  // 2. Strict Off-Topic Guard
-  const hasProductOrShoppingIntent =
-    /\b(?:shoe|shoes|joot|jootay|jooti|boot|boots|sneaker|sneakers|spikes|studs|chappal|sandal|jogger|joggers|kit|jersey|shirt|shirts|pant|pants|bat|ball|racket|equipment|wear|clothes|cloth|kapr|kapray|dress|phone|mobile|pizza|burger|khana|dinner|khareed|buy|shopping|price|qimat|rate|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|bachat|sale|deal|deals)\b/i.test(
-      lower
-    );
-
-  const sportsOffTopicRegex =
-    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i;
-  const isSportsOffTopic = sportsOffTopicRegex.test(lower) && !hasProductOrShoppingIntent;
-
-  const otherOffTopicPatterns = [
-    // Casual Chit-Chat, Personal Queries, TV & Media
-    /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
-    // Politics, News, Weather, Coding & General Knowledge
-    /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
-  ];
-  const isStrictlyOffTopic = isSportsOffTopic || otherOffTopicPatterns.some((rgx) => rgx.test(lower));
-
-  if (isStrictlyOffTopic) {
+  // 4. Strict Off-Topic Early Guard
+  if (parsed.intent === 'off_topic_trivia') {
     const refusal =
       language === 'roman_urdu'
         ? "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?"
@@ -1334,10 +1114,16 @@ export async function askJumbleBachatAssistant(
       deals: [],
       is_off_topic: true,
       language,
+      suggested_chips: [
+        '👗 Khaadi & Gul Ahmed Sale',
+        '🍕 Cheezious Pizza Combos',
+        '👟 Bata Shoes 50% Off',
+        '🎯 Rs. 3,000 Budget Deals',
+      ],
     };
   }
 
-  // 3. Compact Catalog format for Gemini context
+  // 5. Compact Catalog format for Gemini context
   const catalogContext = liveDeals
     .map((d, idx) => {
       const brandName = (d as any).brand?.name || (d as any).brand_name || 'Brand';
@@ -1356,7 +1142,7 @@ export async function askJumbleBachatAssistant(
 
   const apiKey = await getEffectiveGeminiKey();
 
-  // 4. If Gemini API Key is available, prompt Gemini 1.5 Flash with the Live Deals Context
+  // 6. If Gemini API Key is available, prompt Gemini with Chain-of-Thought
   if (apiKey) {
     try {
       const systemPrompt = `You are "Jumble Master Salesman & Bachat Advisor", the elite personal shopping salesman for the Jumble Sale platform in Pakistan.
@@ -1364,7 +1150,7 @@ export async function askJumbleBachatAssistant(
 YOUR MISSION AS A CUSTOMER-CENTRIC SALESMAN:
 You are NOT a software tester, robotic search engine, or developer. You are a respectful, energetic, trustworthy Pakistani personal shopping salesman (like an expert, honest shopkeeper in Liberty / Anarkali / Dolmen Mall who knows every sale in town and treats customers with deep respect).
 
-ACTIVE SHOPPING CONVERSATION MEMORY (CUSTOMER PREVIOUS PREFERENCES):
+ACTIVE SHOPPING CONVERSATION MEMORY:
 • Active Brand: ${state.activeBrand || 'None yet'}
 • Active Category: ${state.activeCategory || 'None yet'}
 • Active Budget: ${state.activeBudget ? 'Rs. ' + state.activeBudget.toLocaleString() : 'Not yet set'}
@@ -1372,63 +1158,52 @@ ACTIVE SHOPPING CONVERSATION MEMORY (CUSTOMER PREVIOUS PREFERENCES):
 • Recently Shown Deal IDs: ${state.lastPitchedDealIds?.join(', ') || 'None'}
 • Recently Discussed Alternative Brands: ${state.lastDiscussedBrands?.join(', ') || 'None'}
 
-CRITICAL RULES & CUSTOMER INTERACTIONS:
+CRITICAL RULES & 7 CORE CONDITIONS:
 1. STRICT ZERO DEVELOPER JARGON RULE:
    - NEVER, UNDER ANY CIRCUMSTANCES, use the words "database", "live database", "database mein", "system", "records", or "query" to the customer!
    - Always refer to "hamare registered official brand partners" or "Jumble Sale par registered brands".
 
 2. "SHOW ON DEMAND" POST DISPLAY POLICY:
    - ONLY populate "matched_deal_ids" with deal IDs when the customer EXPLICITLY asks to see or show posts/deals (e.g. using words like "dikhao", "dikhayein", "show", "cards", "deals dikhao", "posts dikhao") OR when asking for deals under a specific budget ("3000 ke andar dikhao") or follow-up cheapest ("in mai se sasta kaun sa hai").
-   - For greetings, platform questions, help requests, general chit-chat, or off-topic questions: ALWAYS return "matched_deal_ids": [] (EMPTY ARRAY!). Do NOT blurt out product cards unless requested!
+   - For greetings, platform questions, help requests ("madad kro meri shopping krnay mai"), product availability inquiries ("football shoes mil jaye gai?"), general chit-chat: ALWAYS return "matched_deal_ids": [] (EMPTY ARRAY!). Do NOT blurt out product cards unless commanded!
 
 3. CONVERSATIONAL CONTINUITY & PRONOUN RESOLUTION:
-   - If the customer asks "in mai se sasta kaun sa hai?" / "inme se sasta" / "sab se sasta":
-     Look at the deals previously pitched or active brand and highlight the single cheapest option with its exact price and rupee savings math! Do NOT ask "kis brand ka?".
-   - If the customer says "unke hi dikha do" / "unhi ke dikhao":
-     Look at the recently discussed alternative brands (e.g. Khaadi/Outfitters) and show their deals!
-   - If the customer specifies a budget (e.g. "Rs. 3,000") in a previous turn, KEEP that budget active for subsequent item queries (e.g. when they next ask "shoes dikhao", show shoes under Rs. 3,000!).
-   - If customer asks for "matching" shoes or accessories, use their active category and target demographic to recommend complementary items (e.g. matching Bata shoes for Khaadi clothes).
-   - Never make the customer repeat their preferences, brand names, or budget if they already told you!
+   - If the customer asks "in mai se sasta kaun sa hai?": highlight the single cheapest option with its exact price and rupee savings math!
+   - If the customer says "unke hi dikha do": look at the recently discussed alternative brands (e.g. Khaadi/Outfitters) and show their deals!
+   - If the customer specifies a budget (e.g. "Rs. 3,000") in a previous turn, KEEP that budget active for subsequent item queries.
+   - If customer asks for "matching" shoes or accessories, recommend complementary items (e.g. matching Bata shoes for Khaadi clothes).
 
 4. RESPECTFUL GREETINGS:
-   - When user says "hey", "hi", "hello": Respond with:
-     "Hello Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj kis cheez ki shopping ka irada hai — naye kapray, jootay, budget smartphone ya shaam ka dinner? Aap batayein main foran best deals aur posts dikha deta hoon!"
-     Return matched_deal_ids: [].
-   - When user says "assalam o alaikum", "aslamu alaikum", "salam", "aoa": Respond with:
-     "Walaikum Assalam Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj Pakistan ke kis brand ya category par shopping ka irada hai? Aur budget kitna zehan mein hai? Aap batayein main foran best deals aur posts nikaal deta hoon!"
-     Return matched_deal_ids: [].
+   - When user says "hey", "hi", "hello" or "salam": Greet respectfully Janab, ask what they wish to shop for and what budget they have. Return matched_deal_ids: [].
 
 5. PLATFORM & PRODUCT INQUIRIES:
-   - When user asks what products or brands are available (e.g. "tumharay brand mai kis trah ki products han", "yahan kya milta hai", "jumble sale kya hai"):
-     Explain warmly that Jumble Sale offers verified discounted products from Pakistan's registered official brand partners across Fashion & Kapray (Khaadi, Outfitters, Gul Ahmed), Footwear & Jootay (Bata), Electronics & Mobiles (PriceOye), Food & Dining (Cheezious), Grocery (Imtiaz), and Home & Living (Habitt) with 30% to 70% discounts.
-     Ask which category or brand they want to see, and return matched_deal_ids: []!
+   - When user asks what products or brands are available (e.g. "tumharay brand mai kis trah ki products han?"):
+     Explain warmly that Jumble Sale offers verified discounts from Pakistan's registered official brand partners across Fashion (Khaadi, Outfitters, Gul Ahmed), Footwear (Bata), Electronics (PriceOye), Food (Cheezious), Grocery (Imtiaz), and Home (Habitt) with 30% to 70% discounts. Return matched_deal_ids: [].
 
-6. DINERS (MENSWEAR) VS DINNER (FOOD) HANDLING:
-   - In Pakistan, "Diners" is a well-known menswear brand. If user asks "dinners ki deal available ha?" or "orr dinners ki ha?":
-     Politely clarify that Diners menswear brand is not currently registered on Jumble Sale (recommend registered fashion brands Khaadi and Outfitters instead), or if they meant evening dinner food, mention Cheezious pizza combos. Return matched_deal_ids: [] unless they ask to show deals.
+6. FOOTWEAR & SPORTS DISAMBIGUATION:
+   - If user asks "football shoes mil jaye gai?": This is a retail footwear inquiry, NOT off-topic sports trivia. Explain football cleats are not registered, but Bata Power sports/running sneakers are available with 40% discount. Return matched_deal_ids: [] unless they ask to show them.
 
-7. SHOPPING GUIDANCE & DISCOVERY:
-   - When user asks "madad kro meri shopping krnay mai", "shopping guide", etc.:
-     Warmly ask what product they are interested in (kapray, shoes, tech, dinner) and their budget. Return matched_deal_ids: [].
+7. DINERS VS DINNER DISAMBIGUATION:
+   - Clarify Diners menswear brand vs evening dinner food. Return matched_deal_ids: [].
 
-8. STRICT "OUT OF SYLLABUS" REFUSAL:
-   - If user asks ANY non-shopping question (football, cricket, sports, politics, weather, coding, homework, movies, general chit-chat):
-     Respond with ONLY:
-     "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par discount dekhna hai?"
-     Return matched_deal_ids: [] and is_off_topic: true.
-
-9. VALUE PITCHING & SAVINGS MATH (WHEN SHOWING DEALS):
-   - When the user asks to see deals ("dikhao"), do the bachat math! State original price, discounted price, and rupee savings!
-   - Highlight limited stock and urgency respectfully.
-   - Speak in natural, respectful Pakistani Roman Urdu (aap, janab, bachat, mubarak).
+8. VALUE PITCHING & SAVINGS MATH:
+   - When showing deals, state original price, discounted price, and rupee savings! Speak in natural, respectful Pakistani Roman Urdu (aap, janab, bachat).
 
 LIVE REGISTERED BRANDS & DEALS CATALOG:
 ${catalogContext || 'No deals currently active.'}
 
 OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
 {
+  "thought_analysis": {
+    "full_query_meaning": "...",
+    "core_entity": "...",
+    "intent_type": "...",
+    "has_shopping_intent": true,
+    "user_explicitly_requested_cards": false,
+    "should_display_deal_cards": false
+  },
   "reply": "Your persuasive, energetic, consultative salesman pitch explaining the savings and advice...",
-  "matched_deal_ids": ["deal-id-1"],
+  "matched_deal_ids": [],
   "is_off_topic": false
 }`;
 
@@ -1466,69 +1241,35 @@ OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
         const json = await res.json();
         const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
         if (text) {
-          const parsed = JSON.parse(text);
-          const matchedIds: string[] = Array.isArray(parsed.matched_deal_ids)
-            ? parsed.matched_deal_ids
+          const geminiParsed = JSON.parse(text);
+          const matchedIds: string[] = Array.isArray(geminiParsed.matched_deal_ids)
+            ? geminiParsed.matched_deal_ids
             : [];
           let matchedDeals = liveDeals.filter((d) => matchedIds.includes(d.id));
 
-          // Cross-verify: if user specifically asked to see a brand, filter accordingly
-          const isExplicitShow = /\b(?:dikhao|dikhayein|dikha|dekhao|show|posts|cards)\b/i.test(lower);
-          const isKhaadi = /khaadi/i.test(lower);
-          const isOutfitters = /outfitter/i.test(lower);
-          const isGulAhmed = /gul\s*ahmed|gulahmed/i.test(lower);
-          const isBata = /bata/i.test(lower);
-          const isCheezious = /cheezious/i.test(lower);
-          const isPriceOye = /price\s*oye|priceoye/i.test(lower);
-          const isSaeedGhani = /saeed\s*ghani|saeedghani/i.test(lower);
-
-          if (isExplicitShow) {
-            if (isKhaadi) {
-              const kb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('khaadi') || (d.title || '').toLowerCase().includes('khaadi'));
-              if (kb.length > 0) matchedDeals = kb;
-            } else if (isOutfitters) {
-              const ob = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('outfitter') || (d.title || '').toLowerCase().includes('outfitter'));
-              if (ob.length > 0) matchedDeals = ob;
-            } else if (isGulAhmed) {
-              const gb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('gul') || (d.title || '').toLowerCase().includes('gul'));
-              if (gb.length > 0) matchedDeals = gb;
-            } else if (isBata) {
-              const bb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('bata') || (d.title || '').toLowerCase().includes('bata'));
-              if (bb.length > 0) matchedDeals = bb;
-            } else if (isCheezious) {
-              const cb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('cheezious') || (d.title || '').toLowerCase().includes('cheezious'));
-              if (cb.length > 0) matchedDeals = cb;
-            } else if (isPriceOye) {
-              const pb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('priceoye') || (d.title || '').toLowerCase().includes('priceoye'));
-              if (pb.length > 0) matchedDeals = pb;
-            } else if (isSaeedGhani) {
-              const sb = liveDeals.filter(d => ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase().includes('saeed') || (d.title || '').toLowerCase().includes('saeed'));
-              if (sb.length > 0) matchedDeals = sb;
-            }
-          }
-
-          // Build dynamic chips based on context
           let contextualChips = [
             '👗 Khaadi Deals Dikhao',
             '🍕 Cheezious Pizza Dikhao',
             '👟 Bata Shoes Dikhao',
             '🎯 Rs. 3,000 Budget Deals',
           ];
-          if (isKhaadi || isOutfitters || isGulAhmed) {
+          if (parsed.primaryBrand === 'Khaadi' || parsed.primaryBrand === 'Outfitters') {
             contextualChips = ['👟 Matching Bata Shoes', '💰 Is se sasta alternative', '🔥 50%+ OFF Flash Deals'];
-          } else if (isCheezious) {
+          } else if (parsed.primaryBrand === 'Cheezious') {
             contextualChips = ['🥤 Wings & Drinks Combo', '🍔 Burger Deals', '🛵 Fast Delivery Info'];
-          } else if (isBata) {
+          } else if (parsed.primaryBrand === 'Bata Pakistan' || parsed.primaryCategory === 'footwear') {
             contextualChips = ['👗 Matching Khaadi Kurti', '👟 Casual Sneakers', '💰 Under Rs. 2,000'];
           }
 
-          return {
-            reply: parsed.reply || 'Yeh rahein aap ke liye behtareen deals:',
-            deals: matchedDeals, // NEVER blindly fall back to liveDeals.slice(0, 3)! If matchedDeals is empty, return []!
-            is_off_topic: Boolean(parsed.is_off_topic),
+          const rawAssistantRes: AssistantResponse = {
+            reply: geminiParsed.reply || 'Janab! Yeh rahi hamari behtareen verified deals:',
+            deals: matchedDeals,
+            is_off_topic: Boolean(geminiParsed.is_off_topic),
             language,
             suggested_chips: contextualChips,
           };
+
+          return enforceSalesmanConditions(rawAssistantRes, parsed, state, liveDeals);
         }
       }
     } catch (apiErr) {
@@ -1536,8 +1277,9 @@ OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
     }
   }
 
-  // 5. Intelligent Deterministic Heuristic Matcher using REAL LIVE DATABASE DEALS & CONVERSATION STATE
-  return runDeterministicBachatSearch(query, liveDeals, language, state);
+  // 7. Intelligent Deterministic Heuristic Matcher evaluating 7 Conditions
+  const deterministicRes = runDeterministicBachatSearch(query, liveDeals, language, state, parsed);
+  return enforceSalesmanConditions(deterministicRes, parsed, state, liveDeals);
 }
 
 // ==============================================================================

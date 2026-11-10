@@ -246,7 +246,7 @@ export default function AIAssistantScreen() {
             <View>
               <Text style={styles.headerTitle}>Jumble AI Personal Salesman</Text>
               <Text style={styles.headerSubtitle}>
-                Bachat Advisor • Live Database Connected • High-Value Deals
+                Bachat Advisor • Verified Brand Partners • Exclusive Savings
               </Text>
             </View>
           </View>

@@ -333,8 +333,8 @@ export function parseFullSentence(
   // 2. Budget Extraction
   let budgetConstraint: number | undefined;
   const budgetMatch =
-    normalized.match(/(?:budget|range|under|andar|tak|mein)(?:[^\d]{1,15})?(\d{3,6})/i) ||
-    normalized.match(/(\d{3,6})(?:[^\d]{1,15})?(?:budget|ke\s*andar|tak)/i) ||
+    normalized.match(/(?:budget|range|under|andar|tak|mein|mai|neechay|se\s*neechay|se\s*kam|kam)(?:[^\d]{1,15})?(\d{3,6})/i) ||
+    normalized.match(/(\d{3,6})(?:[^\d]{1,15})?(?:budget|ke\s*andar|tak|se\s*neechay|se\s*kam|neechay|mein|mai)/i) ||
     normalized.match(/(?:rs\.?|pkr)\s*(\d{3,6})/i);
   if (budgetMatch) {
     budgetConstraint = parseInt(budgetMatch[1], 10);
@@ -402,12 +402,14 @@ export function parseFullSentence(
   // 6. Has Retail/Shopping Intent Check in current query
   const hasCurrentShoppingIntent =
     Boolean(currentQueryCategory || primaryBrand) ||
-    /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|voucher|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|brand|brands|products|product|shop|store|collection|pret|lawn|unstitched|suit|jootay|sneakers|phone|delivery|exchange|return|cost)\b/i.test(
+    Boolean(budgetMatch) ||
+    /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|voucher|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|brand|brands|products|product|shop|store|collection|pret|lawn|unstitched|suit|jootay|sneakers|phone|delivery|exchange|return|cost|neechay|se\s*neechay|se\s*kam|andar|ke\s*andar|mil\s*raha|mil\s*rahi|mil\s*rahay|mil\s*rahe|mil\s*ta|mil\s*ti|mil\s*te|mil\s*sakta|mojood|konsi|kaunsi|kiya\s*mil|kya\s*mil)\b/i.test(
       normalized
     );
 
-  // Inherit category from conversation memory ONLY when shopping/product intent exists
-  if (!primaryCategory && state?.activeCategory && (hasCurrentShoppingIntent || isExplicitShow)) {
+  // Inherit category from conversation memory ONLY when not asking an open cross-product query
+  const isOpenProductQuery = /\b(?:kiya\s*mil|kya\s*mil|konsi\s*product|kaunsi\s*product|konsi\s*cheez|kaunsi\s*cheez|kya\s*hai|kiya\s*hai|kuch\s*bhi|kya\s*kya)\b/i.test(normalized);
+  if (!primaryCategory && state?.activeCategory && !isOpenProductQuery && (hasCurrentShoppingIntent || isExplicitShow)) {
     primaryCategory = state.activeCategory;
   }
 
@@ -491,8 +493,8 @@ export function parseFullSentence(
     intent = 'policy_support';
   } else if (isExplicitShow) {
     intent = 'show_request';
-  } else if (budgetConstraint && !primaryBrand && !primaryCategory) {
-    intent = 'budget_constrained';
+  } else if (budgetConstraint && (hasCurrentShoppingIntent || /\b(?:kya|kiya|konsi|kaunsi|kuch|cheez|product|mil|dekhna)\b/i.test(normalized))) {
+    intent = isExplicitShow ? 'show_request' : 'budget_constrained';
   } else if (hasShoppingIntent) {
     intent = isExplicitShow ? 'show_request' : 'product_inquiry';
   } else {
@@ -922,7 +924,7 @@ function runDeterministicBachatSearch(
     }
   }
 
-  // BRANCH 10: Budget Range Search
+  // BRANCH 10: Budget Range Search & Price-Level Honesty
   if (parsed.budgetConstraint) {
     const maxBudget = parsed.budgetConstraint;
     let affordableDeals = liveDeals.filter((d) => {
@@ -936,10 +938,14 @@ function runDeterministicBachatSearch(
     });
 
     if (parsed.primaryCategory) {
-      affordableDeals = affordableDeals.filter((d) => {
+      const categoryFiltered = affordableDeals.filter((d) => {
         const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
         return cat.includes(parsed.primaryCategory!);
       });
+      // If found in category, prioritize category; otherwise retain cross-platform
+      if (categoryFiltered.length > 0) {
+        affordableDeals = categoryFiltered;
+      }
     }
 
     if (affordableDeals.length > 0) {
@@ -954,7 +960,7 @@ function runDeterministicBachatSearch(
       const brandName = (topPick as any).brand?.name || 'Brand';
 
       if (parsed.isExplicitShow) {
-        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein top verified deals yeh hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (seedha Rs. ${savings.toLocaleString()} ki bachat!). Neechay diye gaye cards se foran claim karein:`;
+        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein verified products available hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (seedha Rs. ${savings.toLocaleString()} ki bachat!). Neechay diye gaye cards se foran claim karein:`;
         return {
           reply,
           deals: affordableDeals.slice(0, 5),
@@ -967,7 +973,7 @@ function runDeterministicBachatSearch(
           ],
         };
       } else {
-        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein ${brandName} aur hamare verified brand partners par behtareen options mojood hain jahan sirf Rs. ${topPrice.toLocaleString()} mein Rs. ${savings.toLocaleString()} ki direct bachat mil rahi hai!\n\nKya main aapko is budget ki deals aur posts dikhaoon?`;
+        const reply = `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein verified products available hain! Sab se behtareen option ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein Rs. ${savings.toLocaleString()} ki direct bachat ke sath mil raha hai!\n\nKya main aapko is budget ki deals aur posts dikhaoon?`;
         return {
           reply,
           deals: [],
@@ -980,6 +986,62 @@ function runDeterministicBachatSearch(
           ],
         };
       }
+    } else {
+      // Nothing is available under the requested budget!
+      // Sort all active deals by price ascending to find closest lowest options
+      const sortedByPrice = [...liveDeals].sort((a, b) => {
+        const pA =
+          a.discount_price ||
+          (a.original_price && a.discount_pct
+            ? Math.round(a.original_price * (1 - a.discount_pct / 100))
+            : a.original_price || 999999);
+        const pB =
+          b.discount_price ||
+          (b.original_price && b.discount_pct
+            ? Math.round(b.original_price * (1 - b.discount_pct / 100))
+            : b.original_price || 999999);
+        return pA - pB;
+      });
+
+      const lowestPick = sortedByPrice[0];
+      const secondLowest = sortedByPrice[1];
+      const lowestP = lowestPick
+        ? lowestPick.discount_price ||
+          (lowestPick.original_price && lowestPick.discount_pct
+            ? Math.round(lowestPick.original_price * (1 - lowestPick.discount_pct / 100))
+            : lowestPick.original_price || 0)
+        : 0;
+      const secondP = secondLowest
+        ? secondLowest.discount_price ||
+          (secondLowest.original_price && secondLowest.discount_pct
+            ? Math.round(secondLowest.original_price * (1 - secondLowest.discount_pct / 100))
+            : secondLowest.original_price || 0)
+        : 0;
+
+      const lowestBrand =
+        (lowestPick as any)?.brand?.name || (lowestPick as any)?.brand_name || 'Brand';
+      const secondBrand =
+        (secondLowest as any)?.brand?.name || (secondLowest as any)?.brand_name || 'Brand';
+      const diff = lowestP > maxBudget ? lowestP - maxBudget : 0;
+
+      const reply =
+        `Janab! Filhal hamare platform par Rs. ${maxBudget.toLocaleString()} se neechay koi product ya verified deal available nahi hai.\n\n` +
+        `Hamare paas is waqt sab se sasti live verified offer ${lowestBrand} par hai jo sirf Rs. ${lowestP.toLocaleString()} mein mil rahi hai ("${lowestPick?.title || 'Offer'}" - ${lowestPick?.discount_pct || 0}% OFF!)` +
+        (secondLowest ? `, aur doosra sasta option ${secondBrand} ki deal Rs. ${secondP.toLocaleString()} mein hai` : '') +
+        (diff > 0 ? ` (sirf Rs. ${diff.toLocaleString()} ka farq hai)` : '') +
+        `.\n\nKya main aapko in sab se sasti verified deals ki posts dikhaoon?`;
+
+      return {
+        reply,
+        deals: parsed.isExplicitShow ? [lowestPick, secondLowest].filter(Boolean) : [],
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          `⚡ Rs. ${lowestP.toLocaleString()} Deal Dikhao`,
+          '💰 Sab Se Sasti Deals',
+          '🔥 50%+ OFF Flash Deals',
+        ],
+      };
     }
   }
 
@@ -1188,6 +1250,14 @@ CRITICAL RULES & 7 CORE CONDITIONS:
 
 8. VALUE PITCHING & SAVINGS MATH:
    - When showing deals, state original price, discounted price, and rupee savings! Speak in natural, respectful Pakistani Roman Urdu (aap, janab, bachat).
+
+9. BUDGET & AVAILABILITY HONESTY RULE:
+   - When the user asks what products or deals are available under a budget (e.g. "Rs 1000 se neechay kiya mil raha ha?", "Rs 1000 se neechay konsi product mil rahi ha?"):
+     Check the catalog prices!
+     If no deals exist under that budget (e.g. lowest live deal is Saeed Ghani at Rs. 1,250):
+     Explicitly and honestly inform the customer: "Janab! Filhal hamare platform par Rs. 1,000 se neechay koi product ya verified deal available nahi hai."
+     Then recommend the closest lowest-priced deals on the platform (Saeed Ghani at Rs. 1,250 with 50% OFF, Cheezious pizza deal at Rs. 1,450) and mention the rupee difference.
+     Return matched_deal_ids: [] unless they commanded to show posts.
 
 LIVE REGISTERED BRANDS & DEALS CATALOG:
 ${catalogContext || 'No deals currently active.'}

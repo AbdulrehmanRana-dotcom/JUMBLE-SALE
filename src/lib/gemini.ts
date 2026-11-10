@@ -372,19 +372,47 @@ export function parseFullSentence(
 
   // 5. Primary Category Extraction
   let currentQueryCategory: string | undefined;
-  if (/\b(?:shoe|shoes|joot|jootay|jooton|sneaker|sneakers|boot|boots|jogger|joggers|chappal|sandal|sandals|cleats|studs)\b/i.test(normalized)) {
+  if (
+    /\b(?:shoe|shoes|joot|jootay|jooton|sneaker|sneakers|boot|boots|jogger|joggers|chappal|sandal|sandals|cleats|studs|slippers|khussa|kherian)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'footwear';
-  } else if (/\b(?:kapr|kapray|kapron|lawn|kurti|kurtis|suit|suits|dress|dresses|pret|streetwear|fashion|clothes|cloth|shirt|shirts|pant|pants)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:kapr|kapray|kapron|lawn|kurti|kurtis|suit|suits|dress|dresses|pret|streetwear|fashion|clothes|cloth|shirt|shirts|pant|pants|trouser|trousers|jeans|denim|cargo|cargos|chinos|shorts|bottom|bottoms|shalwar|shalwars|pajama|pajamas|tights|legging|leggings|culottes|hoodie|hoodies|jacket|jackets|sweater|sweaters|sweatshirt|sweatshirts|coat|coats|blazer|blazers|kameez|dupatta|dupattas|shawl|shawls|tracksuit|tracksuits)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'fashion';
-  } else if (/\b(?:food|pizza|burger|burgers|wings|khana|dinner|fast\s*food|shawarma|karahi|roll|meal|restaurant)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:food|pizza|pizzas|burger|burgers|wings|khana|dinner|fast\s*food|shawarma|karahi|roll|rolls|meal|restaurant|biryani)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'food';
-  } else if (/\b(?:mobile|mobiles|phone|phones|smartphone|gadget|gadgets|earbud|earbuds|airpod|airpods|laptop|electronics|redmi)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:mobile|mobiles|phone|phones|smartphone|smartphones|gadget|gadgets|earbud|earbuds|airpod|airpods|headphone|headphones|laptop|electronics|redmi|xiaomi)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'electronics';
-  } else if (/\b(?:beauty|makeup|skin|skincare|serum|hair\s*oil|cream|cosmetics|rose\s*water)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:beauty|makeup|skin|skincare|serum|serums|hair\s*oil|cream|cosmetics|rose\s*water|shampoo|soap|lotion)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'beauty';
-  } else if (/\b(?:grocery|groceries|rashan|supermarket|oil|ghee|atta|sugar|rice|daal)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:grocery|groceries|rashan|supermarket|oil|ghee|atta|sugar|rice|daal|flour|tea|chai)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'grocery';
-  } else if (/\b(?:furniture|bed|beds|bedsheet|bedsheets|sofa|sofas|cushion|decor|curtain|home)\b/i.test(normalized)) {
+  } else if (
+    /\b(?:furniture|bed|beds|bedsheet|bedsheets|sofa|sofas|cushion|cushions|decor|curtain|curtains|home|mattress)\b/i.test(
+      normalized
+    )
+  ) {
     currentQueryCategory = 'home';
   }
 
@@ -403,7 +431,10 @@ export function parseFullSentence(
   const hasCurrentShoppingIntent =
     Boolean(currentQueryCategory || primaryBrand) ||
     Boolean(budgetMatch) ||
-    /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|voucher|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|brand|brands|products|product|shop|store|collection|pret|lawn|unstitched|suit|jootay|sneakers|phone|delivery|exchange|return|cost|neechay|se\s*neechay|se\s*kam|andar|ke\s*andar|mil\s*raha|mil\s*rahi|mil\s*rahay|mil\s*rahe|mil\s*ta|mil\s*ti|mil\s*te|mil\s*sakta|mojood|konsi|kaunsi|kiya\s*mil|kya\s*mil)\b/i.test(
+    /\b(?:deal|deals|sale|sales|discount|discounts|bachat|offer|offers|coupon|voucher|sasta|sasti|saste|mehnga|mehngi|budget|price|qimat|rate|khareed|buy|shopping|order|claim|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|brand|brands|products|product|shop|store|collection|pret|lawn|unstitched|suit|jootay|sneakers|phone|delivery|exchange|return|cost|neechay|se\s*neechay|se\s*kam|andar|ke\s*andar|mil\s*raha|mil\s*rahi|mil\s*rahay|mil\s*rahe|mil\s*ta|mil\s*ti|mil\s*te|mil\s*sakta|mil\s*sakti|mil\s*sakte|mojood|konsi|kaunsi|kiya\s*mil|kya\s*mil|apke\s*paas|aapke\s*paas|apke\s*pas|aapke\s*pas|paas\s*hai|paas\s*ha|pas\s*hai|pas\s*ha|rakhte\s*ho|rakhtay\s*ho|rakhte\s*hain|rakhtay\s*han|bechte\s*ho|bechtay\s*ho|bechte\s*hain|bechtay\s*han|hoga|hogi|hongay|honge|mile\s*ga|milay\s*ga|milti\s*hai|milta\s*hai|milte\s*hain|hai\s*kya|ha\s*kya|par\s*kya|app\s*mai|app\s*mein|aapki\s*app|apki\s*app)\b/i.test(
+      normalized
+    ) ||
+    /ha\s*apke\s*paas|hai\s*aapke\s*paas|apke\s*paas\s*hai|apke\s*pas\s*ha|app\s*mai\s*available|app\s*mein\s*available/i.test(
       normalized
     );
 
@@ -422,6 +453,15 @@ export function parseFullSentence(
   if (/\b(?:football|soccer|cricket|tennis|hockey|running|gym|workout|sports)\b/i.test(normalized)) {
     modifiers.push('sports');
     if (/\bfootball\b/i.test(normalized)) modifiers.push('football');
+  }
+  if (/\b(?:trouser|trousers|pant|pants|jeans|denim|cargo|cargos|chinos|bottom|bottoms|shalwar|pajama|tights)\b/i.test(normalized)) {
+    modifiers.push('trousers');
+  }
+  if (/\b(?:hoodie|hoodies|jacket|jackets|sweater|sweaters|sweatshirt|sweatshirts|coat|blazer)\b/i.test(normalized)) {
+    modifiers.push('hoodies');
+  }
+  if (/\b(?:kurti|kurtis|suit|suits|lawn|pret|unstitched|kameez|dupatta|shawl)\b/i.test(normalized)) {
+    modifiers.push('suits_kurtis');
   }
   if (/\b(?:formal|casual|party|shaadi|wedding|pret|unstitched)\b/i.test(normalized)) {
     modifiers.push('formal_pret');
@@ -873,6 +913,145 @@ function runDeterministicBachatSearch(
     }
   }
 
+  // BRANCH 8D: Sub-category Apparel Entity: Trousers, Pants, Jeans, Cargos, Chinos, Bottoms
+  if (
+    /\b(?:trouser|trousers|pant|pants|jeans|denim|cargo|cargos|chinos|bottom|bottoms|shalwar|pajama|tights)\b/i.test(
+      lower
+    )
+  ) {
+    const trouserDeals = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      const desc = (d.description || '').toLowerCase();
+      return (
+        bName.includes('outfitter') ||
+        bName.includes('khaadi') ||
+        title.includes('streetwear') ||
+        desc.includes('jeans') ||
+        desc.includes('pret')
+      );
+    });
+
+    if (parsed.isExplicitShow) {
+      const reply =
+        "Janab! Trousers aur bottoms ke liye hamare verified brand **Outfitters** (streetwear pants aur denim par 40% OFF) aur **Khaadi** (matching pret trousers par 50% tak bachat) par active deals yeh rahi hain. Aap direct card se claim kar sakte hain:";
+      return {
+        reply,
+        deals: trouserDeals.slice(0, 4),
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '👖 Outfitters Trousers Dikhao',
+          '👗 Khaadi Pret Bottoms',
+          '👟 Matching Bata Shoes',
+          '💰 Under Rs. 3,000',
+        ],
+      };
+    } else {
+      const reply =
+        "Janab! Trousers aur pants bilkul available hain! Hamare verified registered brand **Outfitters** par streetwear trousers, cargo aur denim jeans par up to 40% flat discount chal raha hai (fresh collection sirf Rs. 2,994 mein), aur **Khaadi** par matching pret trousers aur bottoms par 50% tak bachat mojood hai!\n\nKya main aapko Outfitters aur Khaadi ke trousers aur bottoms ki verified deals aur posts dikhaoon?";
+      return {
+        reply,
+        deals: [],
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '👖 Trousers Deals Dikhao',
+          '👕 Outfitters Sale Dikhao',
+          '👗 Khaadi Bottoms Dikhao',
+          '💰 Rs. 3,000 ke andar',
+        ],
+      };
+    }
+  }
+
+  // BRANCH 8E: Sub-category Apparel Entity: Hoodies, Jackets, Sweaters, Sweatshirts
+  if (
+    /\b(?:hoodie|hoodies|jacket|jackets|sweater|sweaters|sweatshirt|sweatshirts|coat|blazer)\b/i.test(
+      lower
+    )
+  ) {
+    const hoodieDeals = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      const title = (d.title || '').toLowerCase();
+      const desc = (d.description || '').toLowerCase();
+      return bName.includes('outfitter') || title.includes('streetwear') || desc.includes('hoodie');
+    });
+
+    if (parsed.isExplicitShow) {
+      const reply =
+        "Janab! Hoodies aur denim jackets ke liye hamare verified partner **Outfitters** par yeh active deals hain jahan up to 40% discount mil raha hai:";
+      return {
+        reply,
+        deals: hoodieDeals.slice(0, 4),
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '⚡ Claim Deal',
+          '👖 Matching Trousers',
+          '👟 Bata Casual Sneakers',
+          '💰 Under Rs. 3,000',
+        ],
+      };
+    } else {
+      const reply =
+        "Janab! Hoodies aur denim jackets bilkul available hain! Hamare verified registered brand **Outfitters** par fresh hoodies aur denim jackets par 40% flat discount chal raha hai (sirf Rs. 2,994 mein)!\n\nKya main aapko Outfitters ki hoodies aur streetwear deals ki posts dikhaoon?";
+      return {
+        reply,
+        deals: [],
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '🧥 Outfitters Hoodies Dikhao',
+          '👖 Matching Jeans & Trousers',
+          '👟 Bata Casual Shoes',
+        ],
+      };
+    }
+  }
+
+  // BRANCH 8F: Sub-category Apparel Entity: Kurtis, Suits, Lawn
+  if (
+    /\b(?:kurti|kurtis|suit|suits|lawn|pret|unstitched|kameez|dupatta|shawl)\b/i.test(
+      lower
+    )
+  ) {
+    const kurtiDeals = liveDeals.filter((d) => {
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      return bName.includes('khaadi') || bName.includes('gul ahmed');
+    });
+
+    if (parsed.isExplicitShow) {
+      const reply =
+        "Janab! Kurtis aur suits ke liye hamare registered brand **Khaadi** (Buy 1 Get 1 Free & Flat 50% OFF) aur **Gul Ahmed** (30% OFF) par verified active deals yeh rahi hain:";
+      return {
+        reply,
+        deals: kurtiDeals.slice(0, 4),
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '⚡ Claim Deal',
+          '👟 Matching Bata Shoes',
+          '💰 Rs. 3,000 ke andar',
+        ],
+      };
+    } else {
+      const reply =
+        "Janab! Kurtis aur suits bilkul available hain! Hamare registered brand **Khaadi** par Buy 1 Get 1 Free (ready-to-wear kurtis) aur Flat 50% OFF summer lawn sale chal rahi hai, jabke **Gul Ahmed** par 30% OFF unstitched luxury collection mojood hai!\n\nKya main aapko Khaadi aur Gul Ahmed ki kurti aur suit deals ki posts dikhaoon?";
+      return {
+        reply,
+        deals: [],
+        is_off_topic: false,
+        language: 'roman_urdu',
+        suggested_chips: [
+          '👗 Khaadi Kurti Deals Dikhao',
+          '🌸 Gul Ahmed Lawn Dikhao',
+          '👟 Matching Bata Shoes',
+        ],
+      };
+    }
+  }
+
   // BRANCH 9: Exact Brand Mention (Khaadi, Outfitters, Bata, PriceOye, Cheezious, Gul Ahmed, etc.)
   if (parsed.primaryBrand && parsed.primaryBrand !== 'Diners') {
     const brandName = parsed.primaryBrand;
@@ -1070,8 +1249,43 @@ function runDeterministicBachatSearch(
       const savingsNote =
         savings > 0 ? ` (aur seedha Rs. ${savings.toLocaleString()} ki bachat mil rahi hai!)` : '';
 
+      let categorySalesPitch = '';
+      let categoryChips = ['⚡ Deals Dikhao', '💰 Under Rs. 3,000', '🔥 Flash Sale Dikhao'];
+
+      if (parsed.primaryCategory === 'fashion') {
+        categorySalesPitch =
+          'Janab! Fashion aur kapron ke liye hamare verified registered brands **Khaadi** par 50% OFF (lawn aur kurtis), **Outfitters** par 40% OFF (streetwear, trousers aur hoodies), aur **Gul Ahmed** par 30% OFF chal raha hai!';
+        categoryChips = ['👗 Khaadi Deals Dikhao', '👕 Outfitters Deals Dikhao', '🌸 Gul Ahmed Sale Dikhao'];
+      } else if (parsed.primaryCategory === 'footwear') {
+        categorySalesPitch =
+          "Janab! Shoes aur footwear ke liye hamare verified brand **Bata Pakistan** par men's aur women's sneakers, joggers aur formal shoes par flat 40% discount chal raha hai (sirf Rs. 3,599 mein)!";
+        categoryChips = ['👟 Bata Shoes Dikhao', '👟 Casual Sneakers', '💰 Under Rs. 4,000'];
+      } else if (parsed.primaryCategory === 'electronics') {
+        categorySalesPitch =
+          'Janab! Mobiles aur gadgets ke liye hamare verified partner **PriceOye** par Xiaomi Redmi Note 13 aur wireless earbuds par flat 26% discount chal raha hai (seedha Rs. 15,000 ki bachat)!';
+        categoryChips = ['📱 PriceOye Deals Dikhao', '🎧 Wireless Earbuds', '⚡ Claim Deal'];
+      } else if (parsed.primaryCategory === 'food') {
+        categorySalesPitch =
+          'Janab! Fast food aur khane ke liye hamare verified partner **Cheezious** par Large Pizza aur free wings combo par flat 30% direct discount chal raha hai!';
+        categoryChips = ['🍕 Cheezious Pizza Dikhao', '🍗 Wings & Combos', '💰 Budget Deals'];
+      } else if (parsed.primaryCategory === 'beauty') {
+        categorySalesPitch =
+          'Janab! Skincare aur beauty ke liye hamare registered partner **Saeed Ghani** par organic rose water aur hair care serums par flat 50% discount chal raha hai (sirf Rs. 1,250 mein)!';
+        categoryChips = ['✨ Saeed Ghani Deals Dikhao', '🌹 Rose Water Offer', '💰 Under Rs. 1,500'];
+      } else if (parsed.primaryCategory === 'grocery') {
+        categorySalesPitch =
+          'Janab! Monthly rashan aur grocery ke liye hamare verified partner **Imtiaz Super Market** par essential household items aur staples par 25% tak direct bachat chal rahi hai!';
+        categoryChips = ['🛒 Imtiaz Deals Dikhao', '🍚 Monthly Rashan', '💰 Sasti Grocery'];
+      } else if (parsed.primaryCategory === 'home') {
+        categorySalesPitch =
+          'Janab! Home living aur decor ke liye hamare registered partner **Habitt** par modern furniture aur bedsheets par flat 35% discount chal raha hai!';
+        categoryChips = ['🏠 Habitt Deals Dikhao', '🛏️ Bedsheets Sale', '🛋️ Furniture Deals'];
+      } else {
+        categorySalesPitch = `Janab! Is category mein hamare verified registered brands par ${topDeal.discount_pct || 0}% tak direct discount chal raha hai${savingsNote}!`;
+      }
+
       if (parsed.isExplicitShow) {
-        const reply = `Janab! Yeh dekhein active verified deals jahan top deal par ${topDeal.discount_pct || 0}% discount chal raha hai${savingsNote}. Limited stock hai, foran claim karein:`;
+        const reply = `${categorySalesPitch}\n\nYeh dekhein active verified deals. Limited stock hai, foran claim karein:`;
         return {
           reply,
           deals: catDeals.slice(0, 5),
@@ -1084,17 +1298,13 @@ function runDeterministicBachatSearch(
           ],
         };
       } else {
-        const reply = `Janab! Is category mein hamare verified registered brands par ${topDeal.discount_pct || 0}% tak direct discount chal raha hai${savingsNote}.\n\nKya main aapko iski active deals aur posts dikhaoon?`;
+        const reply = `${categorySalesPitch}\n\nKya main aapko iski active deals aur posts dikhaoon?`;
         return {
           reply,
           deals: [],
           is_off_topic: false,
           language: 'roman_urdu',
-          suggested_chips: [
-            '👗 Deals Dikhao',
-            '💰 Under Rs. 3,000',
-            '🔥 Flash Sale Dikhao',
-          ],
+          suggested_chips: categoryChips,
         };
       }
     }
@@ -1258,6 +1468,19 @@ CRITICAL RULES & 7 CORE CONDITIONS:
      Explicitly and honestly inform the customer: "Janab! Filhal hamare platform par Rs. 1,000 se neechay koi product ya verified deal available nahi hai."
      Then recommend the closest lowest-priced deals on the platform (Saeed Ghani at Rs. 1,250 with 50% OFF, Cheezious pizza deal at Rs. 1,450) and mention the rupee difference.
      Return matched_deal_ids: [] unless they commanded to show posts.
+
+10. APPAREL & EVERYDAY PRODUCT AVAILABILITY RULE:
+   - When the customer asks about everyday retail items (e.g. "trouser ha apke paas", "trousers available ha aapki app mai?", "hoodies mil jaye gi?", "jeans hai?", "shoes milenge?"):
+     NEVER treat it as off-topic! Recognize it as a retail product inquiry immediately.
+     Explicitly state that it is available and name the registered brands:
+     • Trousers / pants / jeans / cargo: available at Outfitters (streetwear pants & denim at 40% OFF) and Khaadi (pret bottoms).
+     • Hoodies / jackets: available at Outfitters (fresh hoodies & denim jackets at 40% OFF).
+     • Kurtis / suits: available at Khaadi (Buy 1 Get 1 Free & 50% OFF) and Gul Ahmed (30% OFF).
+     • Shoes / sneakers: available at Bata Pakistan (sneakers & formal shoes at 40% OFF).
+     • Mobiles: available at PriceOye (Redmi Note 13 & earbuds at 26% OFF).
+     • Fast food: available at Cheezious (Large Pizza combo at 30% OFF).
+     • Skincare: available at Saeed Ghani (organic rose water at 50% OFF).
+     Keep "matched_deal_ids": [] unless the customer explicitly commanded "dikhao" / "show posts"!
 
 LIVE REGISTERED BRANDS & DEALS CATALOG:
 ${catalogContext || 'No deals currently active.'}

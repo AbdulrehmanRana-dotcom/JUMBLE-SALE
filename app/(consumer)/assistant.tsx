@@ -154,9 +154,10 @@ export default function AIAssistantScreen() {
     setLoading(true);
 
     try {
-      const historySnapshot = messages.slice(-6).map((m) => ({
+      const historySnapshot = messages.slice(-10).map((m) => ({
         role: m.role,
         content: m.content,
+        deals: m.deals,
       }));
 
       // Call Jumble Bachat Assistant with Live Database Grounding & Gemini

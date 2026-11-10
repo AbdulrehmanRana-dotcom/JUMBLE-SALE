@@ -297,15 +297,24 @@ function runDeterministicBachatSearch(
   const lower = normalizeDesiTypos(rawLower);
 
   // 1. Strict Out-of-Syllabus Guard (Prioritized)
-  const offTopicPatterns = [
-    // Sports, matches, players, games
-    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i,
+  const hasProductOrShoppingIntent =
+    /\b(?:shoe|shoes|joot|jootay|jooti|boot|boots|sneaker|sneakers|spikes|studs|chappal|sandal|jogger|joggers|kit|jersey|shirt|shirts|pant|pants|bat|ball|racket|equipment|wear|clothes|cloth|kapr|kapray|dress|phone|mobile|pizza|burger|khana|dinner|khareed|buy|shopping|price|qimat|rate|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|bachat|sale|deal|deals)\b/i.test(
+      lower
+    );
+
+  const sportsOffTopicRegex =
+    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i;
+  const isSportsOffTopic = sportsOffTopicRegex.test(lower) && !hasProductOrShoppingIntent;
+
+  const otherOffTopicPatterns = [
     // Casual Chit-Chat, Personal Queries, TV & Media
     /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
     // Politics, News, Weather, Coding & General Knowledge
     /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
   ];
-  if (offTopicPatterns.some((rgx) => rgx.test(lower))) {
+  const isStrictlyOffTopic = isSportsOffTopic || otherOffTopicPatterns.some((rgx) => rgx.test(lower));
+
+  if (isStrictlyOffTopic) {
     const refusal =
       language === 'roman_urdu'
         ? "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?"
@@ -414,6 +423,35 @@ function runDeterministicBachatSearch(
         '👕 Men\'s Fashion Deals Dikhao',
         '🍕 Cheezious Pizza Dikhao',
         '👗 Khaadi Deals Dikhao',
+      ],
+    };
+  }
+
+  // 4B. Sports Footwear & Cleats/Shoes Handling (e.g. "football shoes mil jaye gai?", "sports shoes")
+  const isFootballOrSportsShoes =
+    /\b(?:football|soccer|sports|running|gym)\b/i.test(lower) &&
+    /\b(?:shoe|shoes|joot|jootay|boot|boots|sneaker|sneakers|spikes|studs|jogger|joggers)\b/i.test(lower);
+
+  if (isFootballOrSportsShoes) {
+    const isExplicitShow = /\b(?:dikhao|dikhayein|dikha|show|posts|cards)\b/i.test(lower);
+    const shoeDeals = liveDeals.filter((d) => {
+      const cat = ((d as any).category_name || (d as any).category?.name || '').toLowerCase();
+      const bName = ((d as any).brand?.name || (d as any).brand_name || '').toLowerCase();
+      return cat.includes('footwear') || bName.includes('bata');
+    });
+
+    const reply =
+      "Janab, football ke specific professional studs/cleats filhal hamare platform par registered nahi hain, magar sports, running aur workout ke liye Bata ke Power sneakers aur shoes par flat 40% discount chal raha hai!\n\nKya main aapko Bata ke verified sports sneakers aur shoes ki deals dikhaoon?";
+
+    return {
+      reply,
+      deals: isExplicitShow ? shoeDeals.slice(0, 3) : [],
+      is_off_topic: false,
+      language: 'roman_urdu',
+      suggested_chips: [
+        '👟 Bata Sports Shoes Dikhao',
+        '💰 Rs. 3,000 ke andar shoes',
+        '🔥 50%+ OFF Flash Deals',
       ],
     };
   }
@@ -1269,15 +1307,22 @@ export async function askJumbleBachatAssistant(
   const language: 'roman_urdu' | 'english' = isRomanUrdu ? 'roman_urdu' : 'roman_urdu';
 
   // 2. Strict Off-Topic Guard
-  const offTopicPatterns = [
-    // Sports, matches, players, games
-    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i,
+  const hasProductOrShoppingIntent =
+    /\b(?:shoe|shoes|joot|jootay|jooti|boot|boots|sneaker|sneakers|spikes|studs|chappal|sandal|jogger|joggers|kit|jersey|shirt|shirts|pant|pants|bat|ball|racket|equipment|wear|clothes|cloth|kapr|kapray|dress|phone|mobile|pizza|burger|khana|dinner|khareed|buy|shopping|price|qimat|rate|mil\s*jaye|milega|milenge|available|chahiye|dekhna|dikhao|dikhayein|bachat|sale|deal|deals)\b/i.test(
+      lower
+    );
+
+  const sportsOffTopicRegex =
+    /\b(?:football|soccer|cricket|hockey|tennis|badminton|sports|game|games|gaming|pubg|free\s*fire|fifa|pes|match|score|player|ronaldo|messi|babar|virat)\b/i;
+  const isSportsOffTopic = sportsOffTopicRegex.test(lower) && !hasProductOrShoppingIntent;
+
+  const otherOffTopicPatterns = [
     // Casual Chit-Chat, Personal Queries, TV & Media
     /\b(?:dekhtay\s*ho|dekhte\s*ho|khelte\s*ho|kheltay\s*ho|kya\s*kar\s*rahe\s*ho|kya\s*karte\s*ho|kahan\s*rehte\s*ho|kahan\s*se\s*ho|shadi\s*karoge|shadi\s*hui|girlfriend|boyfriend|love\s*you|pyar|dost\s*banoge|friendship|bore\s*ho\s*raha|baat\s*karo|kuch\s*sunao|latifa|joke|jokes|shayari|ghazal|poetry|song|songs|gaana|movie|movies|film|drama|dramas|netflix|tiktok|youtube)\b/i,
     // Politics, News, Weather, Coding & General Knowledge
     /\b(?:politics|siasat|prime\s*minister|president|imran|nawaz|shehbaz|army|weather|mausam|barish|barsaat|python|javascript|coding|code|homework|essay|capital\s*of|math\s*problem|science|physics|chemistry|biology|history|who\s*is|who\s*won|who\s*was|who\s*created|tell\s*me\s*a\s*story)\b/i
   ];
-  const isStrictlyOffTopic = offTopicPatterns.some((rgx) => rgx.test(lower));
+  const isStrictlyOffTopic = isSportsOffTopic || otherOffTopicPatterns.some((rgx) => rgx.test(lower));
 
   if (isStrictlyOffTopic) {
     const refusal =

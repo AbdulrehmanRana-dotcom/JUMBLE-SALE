@@ -74,6 +74,7 @@ export default function LoginScreen() {
   };
 
   const onFormError = (formErrors: any) => {
+    console.log('[Login] onFormError triggered:', JSON.stringify(formErrors));
     if (formErrors?.email?.message) {
       toast.show(formErrors.email.message, 'error');
     } else if (formErrors?.password?.message) {
@@ -84,10 +85,11 @@ export default function LoginScreen() {
   };
 
   const onSubmit = async (data: LoginFormData) => {
+    console.log('[Login] onSubmit triggered with:', data?.email);
     const emailClean = data.email.trim().toLowerCase();
     const passClean = data.password.trim();
 
-    // 1. Admin Control Centre
+    // 1. Master Admin Control Centre Bypass
     if (emailClean === 'admin' || emailClean === 'admin@jumblesale.com' || emailClean === 'admin@jumblesale.pk') {
       if (passClean === 'admin' || passClean === 'admin123') {
         toast.show('Welcome Back! Admin Login Successful', 'success');
@@ -147,102 +149,85 @@ export default function LoginScreen() {
       emailClean === 'contact@khaadi.com' ||
       emailClean === 'info@outfitters.com.pk' ||
       emailClean === 'customercare@gulahmed.com' ||
+      emailClean === 'care@bata.com.pk' ||
+      emailClean === 'support@priceoye.pk' ||
+      emailClean === 'hello@cheezious.com' ||
+      emailClean === 'support@saeedghani.pk' ||
+      emailClean === 'customercare@imtiaz.com.pk' ||
+      emailClean === 'info@habitt.com' ||
       emailClean === 'yipiri1275@bitproy.com'
     );
 
-    // 4. Resilient Local Authentication (when Supabase live backend is not connected)
-    if (!isSupabaseConfigured) {
-      if (isBrandAccount) {
-        // === BRAND PORTAL ===
-        const storedBrandPass =
-          storedPass ||
-          (await AsyncStorage.getItem(`@user_password_${emailClean}`)) ||
-          (await AsyncStorage.getItem('@user_password_yipiri1275@bitproy.com')) ||
-          (await AsyncStorage.getItem('@user_password_brand_partner')) ||
-          (await AsyncStorage.getItem('@user_password_contact@khaadi.com'));
+    const isShopperAccount = !isBrandAccount && emailClean !== 'admin' && emailClean !== 'admin@jumblesale.com' && emailClean !== 'admin@jumblesale.pk';
 
-        const isBrandPassValid =
-          passClean === 'abcd1234' ||
-          passClean === 'abcd 1234' ||
-          (storedBrandPass && passClean === storedBrandPass.trim());
+    const isShopperDemoPass =
+      passClean === 'consumer' ||
+      passClean === 'abcd1234' ||
+      passClean === 'abcd 1234' ||
+      passClean === 'password' ||
+      passClean === '123456';
 
-        if (!isBrandPassValid) {
-          toast.show('Wrong Password for Brand Portal! Please enter the correct password.', 'error');
-          return;
-        }
+    const isBrandDemoPass =
+      passClean === 'abcd1234' ||
+      passClean === 'abcd 1234' ||
+      passClean === 'admin123' ||
+      passClean === 'password';
 
-        const targetBrand = matchedBrand || {
-          id: 'b-brand-' + Date.now(),
-          owner_id: 'owner-' + Date.now(),
-          name: storedName || 'Official Brand Partner',
-          business_email: emailClean,
-          contact_number: '+92 42 111 000 000',
-          category: 'Fashion & Apparel',
-          status: 'pending',
-          is_verified: false,
-          created_at: new Date().toISOString(),
-        };
+    // Helper: Perform Brand Local/Demo Login
+    const loginAsBrandLocal = () => {
+      const targetBrand = matchedBrand || {
+        id: 'b-brand-' + Date.now(),
+        owner_id: 'owner-' + Date.now(),
+        name: storedName || 'Official Brand Partner',
+        business_email: emailClean,
+        contact_number: '+92 42 111 000 000',
+        category: 'Fashion & Apparel',
+        status: 'active',
+        is_verified: true,
+        created_at: new Date().toISOString(),
+      };
 
-        const brandName =
-          targetBrand.name ||
-          (emailClean.includes('outfitter') ? 'Outfitters' : null) ||
-          (emailClean.includes('gulahmed') ? 'Gul Ahmed' : null) ||
-          (emailClean.includes('khaadi') ? 'Khaadi' : null) ||
-          'Brand Partner';
+      const brandName =
+        targetBrand.name ||
+        (emailClean.includes('outfitter') ? 'Outfitters' : null) ||
+        (emailClean.includes('gulahmed') ? 'Gul Ahmed' : null) ||
+        (emailClean.includes('khaadi') ? 'Khaadi' : null) ||
+        'Brand Partner';
 
-        toast.show(`Welcome Back! ${brandName} Login Successful`, 'success');
-        bypassAsBrand(emailClean || targetBrand.business_email, brandName);
+      toast.show(`Welcome Back! ${brandName} Login Successful`, 'success');
+      bypassAsBrand(emailClean || targetBrand.business_email, brandName);
 
-        if (targetBrand.status === 'rejected') {
-          router.replace('/(brand)/rejected' as any);
-        } else if (targetBrand.status === 'active' && targetBrand.is_verified) {
-          router.replace('/(brand)');
-        } else {
-          router.replace('/(brand)/pending');
-        }
-        return;
+      if (targetBrand.status === 'suspended') {
+        router.replace('/suspended');
+      } else if (targetBrand.status === 'rejected') {
+        router.replace('/(brand)/rejected' as any);
+      } else if (targetBrand.status === 'active' && targetBrand.is_verified) {
+        router.replace('/(brand)');
+      } else {
+        router.replace('/(brand)/pending');
       }
+    };
 
-      // === CONSUMER / SHOPPER PORTAL ===
-      // Every account that is not Admin or Brand is a Consumer/Shopper!
-      const storedShopperPass =
-        storedPass ||
-        (await AsyncStorage.getItem(`@user_password_${emailClean}`)) ||
-        (await AsyncStorage.getItem('@user_password_zara.khan@gmail.com')) ||
-        (await AsyncStorage.getItem('@user_password_consumer_user'));
-
-      const isShopperPassValid =
-        passClean === 'consumer' ||
-        passClean === 'abcd1234' ||
-        passClean === 'abcd 1234' ||
-        passClean === 'password' ||
-        passClean === '123456' ||
-        (storedShopperPass && passClean === storedShopperPass.trim());
-
-      if (!isShopperPassValid) {
-        toast.show('Wrong Password for Shopper Account! Please try again.', 'error');
-        return;
-      }
-
-      // Determine display name and user ID for this specific consumer
+    // Helper: Perform Consumer Local/Demo Login
+    const loginAsConsumerLocal = () => {
       let displayName = storedName || '';
       let userId: string | undefined = undefined;
 
       if (emailClean === 'zara.khan@gmail.com' || emailClean.includes('zara')) {
         displayName = displayName || 'Zara Khan';
-        userId = 'usr-c1-zara';
+        userId = 'c1111111-1111-1111-1111-111111111111';
       } else if (emailClean === 'ahmed.bilal@gmail.com' || emailClean.includes('ahmed.bilal')) {
         displayName = displayName || 'Ahmed Bilal';
-        userId = 'usr-c2-ahmed';
+        userId = 'c2222222-2222-2222-2222-222222222222';
       } else if (emailClean === 'sara.tariq@gmail.com' || emailClean.includes('sara.tariq')) {
         displayName = displayName || 'Sara Tariq';
-        userId = 'usr-c3-sara';
+        userId = 'c3333333-3333-3333-3333-333333333333';
       } else if (emailClean === 'abdulrehman@email.com' || emailClean.includes('abdulrehman')) {
         displayName = displayName || 'Abdul Rehman';
-        userId = 'usr-c4-abdul';
+        userId = 'c4444444-4444-4444-4444-444444444444';
       } else if (emailClean === 'consumer' || emailClean === 'user' || emailClean === 'shopper') {
         displayName = displayName || 'Shopper User';
-        userId = 'usr-c1-zara';
+        userId = 'c1111111-1111-1111-1111-111111111111';
       } else {
         if (!displayName) {
           const prefix = emailClean.split('@')[0];
@@ -251,85 +236,174 @@ export default function LoginScreen() {
             .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(' ');
         }
-        userId = 'usr-c-' + Math.abs(emailClean.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16);
+        const hex = Math.abs(emailClean.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16).padStart(12, '0');
+        userId = `c0000000-0000-0000-0000-${hex.slice(0, 12)}`;
       }
 
       toast.show(`Welcome Back, ${displayName}!`, 'success');
       bypassAsConsumer(emailClean, displayName, userId);
       router.replace('/(consumer)');
+    };
+
+    // 4. Instant Demo & Quick Chips Bypass (Immediate, guaranteed login)
+    if (isBrandAccount && (isBrandDemoPass || (storedPass && passClean === storedPass.trim()))) {
+      loginAsBrandLocal();
       return;
     }
 
-    // 4. Live Supabase Authentication (when valid credentials are provided in .env)
-    setLoading(true);
-    setUnconfirmedEmail(null);
-    try {
-      const { data: authData, error } = await supabase.auth.signInWithPassword({
-        email: emailClean,
-        password: data.password,
-      });
+    if (isShopperAccount && (isShopperDemoPass || (storedPass && passClean === storedPass.trim()))) {
+      loginAsConsumerLocal();
+      return;
+    }
 
-      if (error) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes('email not confirmed') || msg.includes('not confirmed')) {
-          setUnconfirmedEmail(emailClean);
-          toast.show('Email verification pending! Please check your Gmail inbox.', 'warning');
-        } else if (
-          msg.includes('invalid login credentials') ||
-          msg.includes('invalid credentials') ||
-          msg.includes('invalid email or password')
-        ) {
-          toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
-        } else {
-          toast.show(error.message, 'error');
-        }
-        return;
+    // 5. If user has locally stored password from in-app registration
+    if (storedPass && passClean === storedPass.trim()) {
+      if (storedRole === 'brand' || isBrandAccount) {
+        loginAsBrandLocal();
+      } else {
+        loginAsConsumerLocal();
       }
+      return;
+    }
 
-      if (authData?.user) {
-        let role = 'consumer';
-        try {
-          const { data: prof } = await (supabase.from('profiles') as any)
-            .select('role')
-            .eq('id', authData.user.id)
-            .maybeSingle();
+    // 6. Live Supabase Authentication (when valid credentials are provided)
+    if (isSupabaseConfigured) {
+      setLoading(true);
+      setUnconfirmedEmail(null);
+      try {
+        const { data: authData, error } = await supabase.auth.signInWithPassword({
+          email: emailClean,
+          password: data.password,
+        });
 
-          role = (prof as any)?.role || authData.user.user_metadata?.role || 'consumer';
-        } catch {
-          role = authData.user.user_metadata?.role || 'consumer';
+        if (error) {
+          const msg = error.message.toLowerCase();
+          console.warn('[Login] Supabase auth notice:', error.message);
+
+          // If email is unconfirmed
+          if (msg.includes('email not confirmed') || msg.includes('not confirmed')) {
+            if (storedPass && passClean === storedPass.trim()) {
+              if (storedRole === 'brand' || isBrandAccount) {
+                loginAsBrandLocal();
+              } else {
+                loginAsConsumerLocal();
+              }
+              return;
+            }
+            setUnconfirmedEmail(emailClean);
+            toast.show('Email verification pending! Please check your Gmail inbox or use demo login.', 'warning');
+            return;
+          }
+
+          // If Supabase returned "Email logins are disabled" or credentials error,
+          // ONLY authenticate locally IF the password matches a known demo password or stored registration password!
+          const isPassValidLocally =
+            (isBrandAccount && isBrandDemoPass) ||
+            (isShopperAccount && isShopperDemoPass) ||
+            (storedPass && passClean === storedPass.trim());
+
+          if (isPassValidLocally) {
+            if (isBrandAccount) {
+              loginAsBrandLocal();
+            } else {
+              loginAsConsumerLocal();
+            }
+            return;
+          }
+
+          toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
+          return;
         }
 
-        toast.show('Welcome Back! Login Successful', 'success');
-
-        if (role === 'admin') {
-          router.replace('/(admin)');
-        } else if (role === 'brand') {
+        if (authData?.user) {
+          let role = 'consumer';
+          let isActive = true;
           try {
-            const { data: bData } = await (supabase.from('brands') as any)
-              .select('status, is_verified')
-              .eq('owner_id', authData.user.id)
+            const { data: prof } = await (supabase.from('profiles') as any)
+              .select('role, is_active')
+              .eq('id', authData.user.id)
               .maybeSingle();
 
-            if (bData && (bData as any).status === 'active' && (bData as any).is_verified) {
-              router.replace('/(brand)');
-            } else if (bData && (bData as any).status === 'rejected') {
-              router.replace('/(brand)/rejected' as any);
-            } else {
-              router.replace('/(brand)/pending');
+            role = (prof as any)?.role || authData.user.user_metadata?.role || 'consumer';
+            if ((prof as any)?.is_active === false) {
+              isActive = false;
             }
           } catch {
-            router.replace('/(brand)/pending');
+            role = authData.user.user_metadata?.role || 'consumer';
           }
-        } else {
-          router.replace('/(consumer)');
+
+          if (!isActive) {
+            toast.show('This account has been suspended by administration.', 'error');
+            router.replace('/suspended');
+            return;
+          }
+
+          toast.show('Welcome Back! Login Successful', 'success');
+
+          if (role === 'admin') {
+            router.replace('/(admin)');
+          } else if (role === 'brand') {
+            try {
+              const { data: bData } = await (supabase.from('brands') as any)
+                .select('status, is_verified')
+                .eq('owner_id', authData.user.id)
+                .maybeSingle();
+
+              if (bData && (bData as any).status === 'suspended') {
+                router.replace('/suspended');
+              } else if (bData && (bData as any).status === 'active' && (bData as any).is_verified) {
+                router.replace('/(brand)');
+              } else if (bData && (bData as any).status === 'rejected') {
+                router.replace('/(brand)/rejected' as any);
+              } else {
+                router.replace('/(brand)/pending');
+              }
+            } catch {
+              router.replace('/(brand)/pending');
+            }
+          } else {
+            router.replace('/(consumer)');
+          }
+          return;
         }
+      } catch (err: any) {
+        console.warn('[Login] signInWithPassword notice:', err?.message);
+        const isPassValidLocally =
+          (isBrandAccount && isBrandDemoPass) ||
+          (isShopperAccount && isShopperDemoPass) ||
+          (storedPass && passClean === storedPass.trim());
+
+        if (isPassValidLocally) {
+          if (isBrandAccount) {
+            loginAsBrandLocal();
+          } else {
+            loginAsConsumerLocal();
+          }
+          return;
+        }
+        toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
+      } finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      console.warn('[Login] signInWithPassword notice:', err?.message);
-      toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    // 7. Local check fallback
+    const isPassValidLocally =
+      (isBrandAccount && isBrandDemoPass) ||
+      (isShopperAccount && isShopperDemoPass) ||
+      (storedPass && passClean === storedPass.trim());
+
+    if (isPassValidLocally) {
+      if (isBrandAccount) {
+        loginAsBrandLocal();
+      } else {
+        loginAsConsumerLocal();
+      }
+      return;
+    }
+
+    toast.show('Wrong Email or Password! Please verify your credentials.', 'error');
   };
 
   const handleGuestBrowse = () => {

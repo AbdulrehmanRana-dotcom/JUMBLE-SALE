@@ -409,14 +409,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     customUserId?: string
   ) => {
     let userId = customUserId;
-    if (!userId) {
+    if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
       const emailLower = userEmail.toLowerCase();
-      if (emailLower.includes('zara')) userId = 'usr-c1-zara';
-      else if (emailLower.includes('ahmed')) userId = 'usr-c2-ahmed';
-      else if (emailLower.includes('sara')) userId = 'usr-c3-sara';
-      else if (emailLower.includes('abdul')) userId = 'usr-c4-abdul';
+      if (emailLower.includes('zara')) userId = 'c1111111-1111-1111-1111-111111111111';
+      else if (emailLower.includes('ahmed')) userId = 'c2222222-2222-2222-2222-222222222222';
+      else if (emailLower.includes('sara')) userId = 'c3333333-3333-3333-3333-333333333333';
+      else if (emailLower.includes('abdul')) userId = 'c4444444-4444-4444-4444-444444444444';
       else {
-        userId = 'usr-c-' + Math.abs(emailLower.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16);
+        const hex = Math.abs(emailLower.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)).toString(16).padStart(12, '0');
+        userId = `c0000000-0000-0000-0000-${hex.slice(0, 12)}`;
       }
     }
 

@@ -10,6 +10,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -32,12 +33,13 @@ interface ChatItem {
 }
 
 const SUGGESTED_QUESTIONS = [
-  '🔥 50%+ OFF wali live deals dikhao',
-  '👗 Eid Fashion aur Lawn par kya sale hai?',
-  '🍔 Food & restaurant deals dikhao',
-  '📱 Sastay smartphones & electronics',
-  '👟 Shoes aur sneakers clearance',
-  '💰 Rs. 5,000 ke budget mein kya mil sakta hai?',
+  '🎯 Rs. 3,000 ke budget mein best dikhao',
+  '👗 Khaadi & Gul Ahmed par sab se bari sale',
+  '🔥 50%+ OFF Flash Deals jo jaldi khatam ho rahi hain',
+  '👟 Bata shoes aur sneakers par best sale',
+  '🍔 Fast food aur dinner ke saste combos',
+  '📱 Sastay budget smartphones & gadgets',
+  '💡 Mujhe sasta alternative dikhao',
 ];
 
 let messageCounter = 0;
@@ -67,7 +69,7 @@ export default function AIAssistantScreen() {
             id: 'welcome-guest',
             role: 'assistant',
             content:
-              'Salam! 🛍️ Main hoon aapka Jumble Bachat Assistant. Pakistan bhar ki active sales, brands aur discounts dhoondhne ke liye mujh se kuch bhi poochhein (jaise "50% off deals", "Rs. 4,000 ke andar kapray", ya "Food offers")!',
+              'Salam Janab! 🛍️ Main hoon aapka Jumble Personal Shopping Salesman aur Bachat Advisor!\n\nPakistan bhar ke verified official brands par sab se sasti deals dhoondne ke liye mujh se mashwara karein. Batayein aaj kis cheez ki shopping ka irada hai — kapray, branded shoes, naya smartphone, ya shaam ka dinner? Aur budget kitna hai?',
             created_at: new Date().toISOString(),
           },
         ]);
@@ -95,7 +97,7 @@ export default function AIAssistantScreen() {
           if (dealIdsToFetch.length > 0) {
             const { data: dealsData } = await supabase
               .from('deals')
-              .select('id, title, discount_pct, end_date, image_urls, brand:brands(name, logo_url)')
+              .select('id, title, discount_pct, original_price, discount_price, end_date, image_urls, brand:brands(name, logo_url)')
               .in('id', dealIdsToFetch);
 
             if (dealsData) {
@@ -118,7 +120,7 @@ export default function AIAssistantScreen() {
               id: 'welcome',
               role: 'assistant',
               content:
-                'Salam! 🛍️ Main hoon aapka Jumble Bachat Assistant. Pakistan bhar ki active sales, brands aur discounts dhoondhne ke liye mujh se kuch bhi poochhein (jaise "50% off deals", "Rs. 4,000 ke andar kapray", ya "Food offers")!',
+                'Salam Janab! 🛍️ Main hoon aapka Jumble Personal Shopping Salesman aur Bachat Advisor!\n\nPakistan bhar ke verified official brands par sab se sasti deals dhoondne ke liye mujh se mashwara karein. Batayein aaj kis cheez ki shopping ka irada hai — kapray, branded shoes, naya smartphone, ya shaam ka dinner? Aur budget kitna hai?',
               created_at: new Date().toISOString(),
             },
           ]);
@@ -203,6 +205,28 @@ export default function AIAssistantScreen() {
     router.push(`/(consumer)/deal/${dealId}` as any);
   };
 
+  const handleShareDeal = async (deal: any, e?: any) => {
+    e?.stopPropagation?.();
+    try {
+      const shareUrl =
+        Platform.OS === 'web' && typeof window !== 'undefined'
+          ? `${window.location.origin}/deal/${deal.id}`
+          : `https://jumblesale.app/deal/${deal.id}`;
+
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.show('Deal link copied to clipboard! 🔗', 'success');
+      } else {
+        await Share.share({
+          title: deal.title,
+          message: `Check out this deal on Jumble Sale: ${deal.title} (${deal.discount_pct}% OFF)! ${shareUrl}`,
+        });
+      }
+    } catch {
+      toast.show('Deal link copied! 🔗', 'info');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -215,9 +239,9 @@ export default function AIAssistantScreen() {
               <Ionicons name="sparkles" size={18} color={colors.textInverse} />
             </View>
             <View>
-              <Text style={styles.headerTitle}>Jumble AI Bachat Assistant</Text>
+              <Text style={styles.headerTitle}>Jumble AI Personal Salesman</Text>
               <Text style={styles.headerSubtitle}>
-                Live Database Connected • Verified Deals Only
+                Bachat Advisor • Live Database Connected • High-Value Deals
               </Text>
             </View>
           </View>
@@ -280,33 +304,55 @@ export default function AIAssistantScreen() {
                           showsHorizontalScrollIndicator={false}
                           contentContainerStyle={styles.dealCardsScroll}>
                           {item.deals.map((deal: any) => {
-                            const brandName = deal.brand?.name || 'Partner Brand';
+                            const brandName = deal.brand?.name || (deal as any).brand_name || 'Partner Brand';
                             const imageUri = deal.image_urls?.[0];
+                            const origPrice = deal.original_price || 0;
+                            const discPrice =
+                              deal.discount_price ||
+                              (origPrice && deal.discount_pct
+                                ? Math.round(origPrice * (1 - deal.discount_pct / 100))
+                                : origPrice);
+                            const savings = origPrice > discPrice ? origPrice - discPrice : 0;
+                            const expiryLabel = deal.end_date
+                              ? `Until ${new Date(deal.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                              : 'Limited Time Offer';
+
                             return (
                               <Pressable
                                 key={deal.id}
                                 style={styles.inChatDealCard}
                                 onPress={() => handleDealCardPress(deal.id)}>
-                                {imageUri ? (
-                                  <Image
-                                    source={{ uri: imageUri }}
-                                    style={styles.dealCardThumb}
-                                    contentFit="cover"
-                                    transition={200}
-                                    cachePolicy="memory-disk"
-                                  />
-                                ) : (
-                                  <View style={styles.dealCardThumbPlaceholder}>
-                                    <Ionicons name="pricetag" size={20} color={colors.primary} />
+                                <View style={{ position: 'relative' }}>
+                                  {imageUri ? (
+                                    <Image
+                                      source={{ uri: imageUri }}
+                                      style={styles.dealCardThumb}
+                                      contentFit="cover"
+                                      transition={200}
+                                      cachePolicy="memory-disk"
+                                    />
+                                  ) : (
+                                    <View style={styles.dealCardThumbPlaceholder}>
+                                      <Ionicons name="pricetag" size={20} color={colors.primary} />
+                                    </View>
+                                  )}
+                                  <View style={styles.cardBadgesOverlay}>
+                                    <View style={styles.discountBadge}>
+                                      <Text style={styles.discountBadgeText}>
+                                        {deal.discount_pct}% OFF
+                                      </Text>
+                                    </View>
+                                    {savings > 0 && (
+                                      <View style={styles.savingsBadge}>
+                                        <Text style={styles.savingsBadgeText}>
+                                          Bachat Rs. {savings.toLocaleString()}
+                                        </Text>
+                                      </View>
+                                    )}
                                   </View>
-                                )}
+                                </View>
 
                                 <View style={styles.dealCardInfo}>
-                                  <View style={styles.discountBadge}>
-                                    <Text style={styles.discountBadgeText}>
-                                      {deal.discount_pct}% OFF
-                                    </Text>
-                                  </View>
                                   <Text style={styles.dealCardBrand} numberOfLines={1}>
                                     {brandName}
                                   </Text>
@@ -314,13 +360,35 @@ export default function AIAssistantScreen() {
                                     {deal.title}
                                   </Text>
 
-                                  <View style={styles.viewOfferRow}>
-                                    <Text style={styles.viewOfferText}>View Deal</Text>
-                                    <Ionicons
-                                      name="arrow-forward"
-                                      size={12}
-                                      color={colors.primary}
-                                    />
+                                  <View style={styles.priceRow}>
+                                    <Text style={styles.dealCardPrice}>
+                                      Rs. {discPrice.toLocaleString()}
+                                    </Text>
+                                    {origPrice > discPrice && (
+                                      <Text style={styles.dealCardOrigPrice}>
+                                        Rs. {origPrice.toLocaleString()}
+                                      </Text>
+                                    )}
+                                  </View>
+
+                                  <View style={styles.expiryRow}>
+                                    <Ionicons name="time-outline" size={11} color={colors.warning} />
+                                    <Text style={styles.expiryText}>{expiryLabel}</Text>
+                                  </View>
+
+                                  <View style={styles.cardActionRow}>
+                                    <Pressable
+                                      style={styles.claimBtn}
+                                      onPress={() => handleDealCardPress(deal.id)}>
+                                      <Ionicons name="flash" size={11} color="#0D1117" />
+                                      <Text style={styles.claimBtnText}>Claim Deal</Text>
+                                    </Pressable>
+
+                                    <Pressable
+                                      style={styles.shareIconBtn}
+                                      onPress={(e) => handleShareDeal(deal, e)}>
+                                      <Ionicons name="share-social-outline" size={13} color={colors.textSecondary} />
+                                    </Pressable>
                                   </View>
                                 </View>
                               </Pressable>
@@ -510,8 +578,8 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   inChatDealCard: {
-    width: 200,
-    backgroundColor: colors.surfaceMuted,
+    width: 215,
+    backgroundColor: '#161922',
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -519,38 +587,57 @@ const styles = StyleSheet.create({
   },
   dealCardThumb: {
     width: '100%',
-    height: 100,
+    height: 105,
   },
   dealCardThumbPlaceholder: {
     width: '100%',
-    height: 100,
+    height: 105,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  dealCardInfo: {
-    padding: spacing[2],
+  cardBadgesOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 4,
   },
   discountBadge: {
     backgroundColor: colors.primary,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: radii.sm,
-    alignSelf: 'flex-start',
-    marginBottom: 4,
   },
   discountBadgeText: {
     fontFamily: typography.caption.fontFamily,
     fontSize: 10,
     fontWeight: '800',
-    color: colors.textInverse,
+    color: '#0D1117',
+  },
+  savingsBadge: {
+    backgroundColor: 'rgba(34, 197, 94, 0.95)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.sm,
+  },
+  savingsBadgeText: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#0D1117',
+  },
+  dealCardInfo: {
+    padding: spacing[2],
   },
   dealCardBrand: {
     fontFamily: typography.caption.fontFamily,
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: colors.primary,
     marginBottom: 2,
   },
   dealCardTitle: {
@@ -561,17 +648,72 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     minHeight: 32,
   },
-  viewOfferRow: {
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 4,
+  },
+  dealCardPrice: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#22C55E',
+  },
+  dealCardOrigPrice: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 11,
+    color: colors.textMuted,
+    textDecorationLine: 'line-through',
+  },
+  expiryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 6,
+    marginTop: 4,
   },
-  viewOfferText: {
+  expiryText: {
+    fontFamily: typography.caption.fontFamily,
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.warning,
+  },
+  cardActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  claimBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: radii.sm,
+  },
+  claimBtnText: {
     fontFamily: typography.caption.fontFamily,
     fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
+    fontWeight: '800',
+    color: '#0D1117',
+  },
+  shareIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   typingRow: {
     flexDirection: 'row',

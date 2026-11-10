@@ -138,34 +138,77 @@ function runDeterministicBachatSearch(
   liveDeals: Deal[],
   language: 'roman_urdu' | 'english'
 ): AssistantResponse {
-  const lower = query.toLowerCase();
+  const lower = query.toLowerCase().trim();
 
-  // 1. Budget Query
-  const budgetMatch = lower.match(/(?:budget|range|under|andar|tak|mein)\s*(?:rs\.?|pkr)?\s*(\d{3,6})/i) ||
-                      lower.match(/(?:rs\.?|pkr)?\s*(\d{3,6})\s*(?:budget|ke andar|tak)/i);
+  // 1. Greeting Detection (Conversational Salesman Welcome & Needs Discovery)
+  const isGreeting = /^(?:hey|hi|hello|salam|aoa|asalam|kya haal|assalam o alaikum)\b/i.test(lower);
+  if (isGreeting) {
+    const top3 = liveDeals.slice(0, 3);
+    const reply =
+      language === 'roman_urdu'
+        ? 'Walekum Assalam Janab! 🛍️ Main hoon aapka Jumble Personal Shopping Salesman aur Bachat Advisor!\n\nBatayein aaj kis cheez ki shopping ka irada hai — apne liye naye kapray, Eid lawn, branded shoes, budget phone, ya shaam ke khane ki zabardast deal? Aur budget kitna zehan mein hai?\n\nJab tak aap batayein, is waqt ki sab se garam top 3 Flash Deals zaroor dekhein:'
+        : 'Hello & Welcome Janab! 🛍️ I am your Jumble Personal Shopping Salesman & Bargain Concierge!\n\nWhat are you shopping for today — fashion & apparel, footwear, budget gadgets, or food deals? And what is your target budget?\n\nMeanwhile, check out our top 3 hottest trending flash deals right now:';
+    return { reply, deals: top3, is_off_topic: false, language };
+  }
+
+  // 2. Budget Query
+  const budgetMatch =
+    lower.match(/(?:budget|range|under|andar|tak|mein)\s*(?:rs\.?|pkr)?\s*(\d{3,6})/i) ||
+    lower.match(/(?:rs\.?|pkr)?\s*(\d{3,6})\s*(?:budget|ke andar|tak)/i);
 
   if (budgetMatch) {
     const maxBudget = parseInt(budgetMatch[1], 10);
     const affordableDeals = liveDeals.filter((d) => {
-      const price = d.discount_price || (d as any).price || (d.original_price && d.discount_pct ? Math.round(d.original_price * (1 - d.discount_pct / 100)) : 0);
+      const price =
+        d.discount_price ||
+        (d as any).price ||
+        (d.original_price && d.discount_pct
+          ? Math.round(d.original_price * (1 - d.discount_pct / 100))
+          : 0);
       return price > 0 && price <= maxBudget;
     });
 
     if (affordableDeals.length > 0) {
       const topPick = affordableDeals[0];
-      const topPrice = topPick.discount_price || (topPick as any).price || (topPick.original_price && topPick.discount_pct ? Math.round(topPick.original_price * (1 - topPick.discount_pct / 100)) : 0);
+      const topPrice =
+        topPick.discount_price ||
+        (topPick as any).price ||
+        (topPick.original_price && topPick.discount_pct
+          ? Math.round(topPick.original_price * (1 - topPick.discount_pct / 100))
+          : 0);
       const savings = (topPick.original_price || topPrice) - topPrice;
+      const brandName = (topPick as any).brand?.name || 'Brand';
 
       const reply =
         language === 'roman_urdu'
-          ? `Zabardast! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein mujhe yeh ${affordableDeals.length} live verified deals mili hain. Sab se behtareen pick ${(topPick as any).brand?.name || 'Brand'} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (aur Rs. ${savings.toLocaleString()} ki bachat ho rahi hai!). Neechay diye gaye deal cards par tap karein:`
-          : `Great news! Within your budget of Rs. ${maxBudget.toLocaleString()}, I found ${affordableDeals.length} active verified deals. Top recommendation is "${topPick.title}" from ${(topPick as any).brand?.name || 'Brand'} at Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Tap any card below:`;
+          ? `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein main ne top verified deals nikali hain. Meri sab se bari recommendation ${brandName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (aur seedha Rs. ${savings.toLocaleString()} ki bachat ho rahi hai!). Stock limited hai, neechay diye gaye card se foran claim karein:`
+          : `Don't worry Janab! Within your Rs. ${maxBudget.toLocaleString()} budget, I hand-picked the best deals. Top recommendation is "${topPick.title}" from ${brandName} at only Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Limited stock, claim below:`;
 
       return { reply, deals: affordableDeals.slice(0, 5), is_off_topic: false, language };
     }
   }
 
-  // 2. Discount Percentage Query
+  // 3. Sasta / Mehnga / Objection Handling
+  const isCheapOrObjection = /sasta|kam budget|mehnga|discount zyada|chhoot|sasti|alternative/i.test(lower);
+  if (isCheapOrObjection) {
+    const sortedCheapest = [...liveDeals].sort((a, b) => {
+      const pA =
+        a.discount_price ||
+        (a.original_price ? Math.round(a.original_price * (1 - (a.discount_pct || 0) / 100)) : 999999);
+      const pB =
+        b.discount_price ||
+        (b.original_price ? Math.round(b.original_price * (1 - (b.discount_pct || 0) / 100)) : 999999);
+      return pA - pB;
+    });
+    const topCheap = sortedCheapest.slice(0, 4);
+    const reply =
+      language === 'roman_urdu'
+        ? `Befikar rahein! Ek acha salesman hamesha customer ke paisay bachata hai. Yeh dekhein hamari sab se sasti aur high-value verified deals jahan qimat intehai munasib hai aur bachat zabardast hai:`
+        : `No worries Janab! A great personal shopper always watches your wallet. Here are our lowest-price, maximum-value verified deals right now:`;
+    return { reply, deals: topCheap, is_off_topic: false, language };
+  }
+
+  // 4. Discount Percentage Query
   const pctMatch = lower.match(/(\d{1,2})\s*%/);
   if (pctMatch) {
     const requestedPct = parseInt(pctMatch[1], 10);
@@ -174,13 +217,13 @@ function runDeterministicBachatSearch(
     if (highDiscountDeals.length > 0) {
       const reply =
         language === 'roman_urdu'
-          ? `Mujhe aapke liye ${requestedPct}% ya is se zyada discount wali ${highDiscountDeals.length} active verified deals mili hain! Kisi bhi deal par tap kar ke verify karein aur brand ki website se direct claim karein:`
-          : `I found ${highDiscountDeals.length} active verified deals offering ${requestedPct}% or more discount! Tap any deal below to claim directly:`;
+          ? `Zabardast choice! Mujhe aapke liye ${requestedPct}% ya is se zyada discount wali ${highDiscountDeals.length} dhamaka deals mili hain! Yeh limited time offers hain, neechay diye gaye cards se direct claim karein:`
+          : `Excellent choice! I found ${highDiscountDeals.length} active verified deals offering ${requestedPct}% or more discount! These are limited-time offers, claim below:`;
       return { reply, deals: highDiscountDeals.slice(0, 5), is_off_topic: false, language };
     }
   }
 
-  // 3. Category or Keyword matching
+  // 5. Category or Keyword matching
   let filtered = liveDeals.filter((d) => {
     const title = (d.title || '').toLowerCase();
     const desc = (d.description || '').toLowerCase();
@@ -217,8 +260,8 @@ function runDeterministicBachatSearch(
 
   const reply =
     language === 'roman_urdu'
-      ? `Jumble Sale database se mujhe aapki search ke mutabiq yeh ${filtered.length} live verified deals mili hain! Neechay cards par tap karein:`
-      : `Here are the top ${filtered.length} active verified deals matching your search on Jumble Sale! Tap any card below:`;
+      ? `Aap ki talash ke mutabiq yeh sab se top verified deals hain jahan sab se bari bachat ho rahi hai! Kisi bhi deal par tap kar ke poori details check karein aur claim karein:`
+      : `Here are the top active verified deals matching your search with maximum savings! Tap any card to claim:`;
 
   return { reply, deals: filtered.slice(0, 5), is_off_topic: false, language };
 }
@@ -287,23 +330,48 @@ export async function askJumbleBachatAssistant(
   // 4. If Gemini API Key is available, prompt Gemini 1.5 Flash with the Live Deals Context
   if (apiKey) {
     try {
-      const systemPrompt = `You are "Jumble Bachat Assistant", the official AI shopping & deals concierge for the Jumble Sale platform in Pakistan.
+      const systemPrompt = `You are "Jumble Master Salesman & Bachat Advisor", the elite personal shopping salesman and deal negotiator for the Jumble Sale platform in Pakistan.
 
-STRICT INSTRUCTIONS:
-1. PLATFORM GROUNDING: Below is the list of REAL LIVE DEALS currently available in the Jumble Sale database. You MUST ONLY recommend and cite deals from this list. DO NOT hallucinate or invent fake deals or fake brands.
-2. SCOPE: ONLY answer questions about shopping, sales, promotions, product pricing, budget management, discount vouchers, and retail stores in Pakistan on Jumble Sale.
-3. OFF-TOPIC REJECTION: If the user asks about ANYTHING outside shopping/sales (such as cricket, politics, weather, school homework, coding, general trivia), politely refuse:
-   "Main sirf Jumble Sale par live deals, discounts aur shopping bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya category par sasti deal dhoondhni hai?"
-4. BUDGET ASSISTANCE: If user mentions a budget (e.g. "Rs. 5000 budget hai"), inspect the prices of live deals, suggest which items they can buy together within that budget, and calculate their total savings!
-5. TONE & LANGUAGE: Reply warmly and politely in conversational ${language === 'roman_urdu' ? 'Pakistani Roman Urdu' : 'English'}. Be helpful, concise, and enthusiastic about savings!
-6. MATCHED DEALS: In the JSON, provide the array "matched_deal_ids" containing the exact string IDs of the relevant live deals from the catalog below so the app can display clickable cards for the user!
+YOUR MISSION AS A HIGH-CONVERTING DESI MASTER SALESMAN:
+You are NOT a boring robotic search engine. You are an energetic, friendly, trustworthy Pakistani personal shopping salesman (like an expert, honest shopkeeper in Liberty / Anarkali / Dolmen Mall who knows every sale in town and genuinely wants the customer to get the absolute maximum value and savings for their hard-earned money).
+
+SALESMAN RULES & TECHNIQUES:
+1. CONSULTATIVE GREETINGS (NEEDS DISCOVERY):
+   - When the user gives a greeting ("hey", "hi", "salam", "aoa", "kya haal hai", etc.):
+     Greet them warmly and respectfully. Do NOT just dump deals. Proactively ask:
+     (1) Aaj kis cheez ki shopping ka irada hai? (Fashion/Lawn, Footwear/Shoes, Electronics/Phones, ya Dinner/Food deals?)
+     (2) Aap ka budget kitna hai?
+     Tease 2-3 hottest live deals as an appetizer.
+2. IRRESISTIBLE VALUE PITCHING & SAVINGS MATH:
+   - Always do the bachat math! When pitching any deal, state the original price, the discounted price, and calculate the exact rupee savings!
+     Example: "Yeh Khaadi ka ready-to-wear set pehle Rs. 6,500 ka tha, abhi Buy 1 Get 1 mein seedha Rs. 3,250 ki bachat mil rahi hai!"
+3. URGENCY & SCARCITY (FOMO):
+   - Highlight the limited-time nature and expiry date of deals. Urge them to claim before stock runs out or prices revert!
+4. SMART CROSS-SELLING (COMPLETE THE LOOK/COMBO):
+   - If user asks for clothes, suggest matching shoes from Bata or accessories.
+   - If user asks for fast food, suggest combos or family meals.
+   - If user asks for smartphones, suggest accessories or audio.
+5. BUDGET ADVISOR:
+   - When a budget is specified (e.g. "Rs. 5,000"), tailor recommendations to stay strictly within that budget, and show how much money remains left over in their pocket!
+6. OBJECTION HANDLING:
+   - If user says "mehnga hai" or "budget kam hai", immediately present the cheapest high-value alternative from the catalog with a comforting reassurance: "Befikar rahein, main aap ke paisay bachata hoon!"
+   - If user asks about quality/authenticity: reassure that Jumble Sale deals come from NTN-verified official brand partners.
+7. PAKISTANI CULTURAL RAPPORT:
+   - Speak in natural, respectful, enthusiastic ${language === 'roman_urdu' ? 'Pakistani Roman Urdu (aap, janab, bhai/baji, zabardast offer, befikar rahein, bachat)' : 'conversational English with Pakistani shopping context'}.
+8. STRICT DATABASE GROUNDING:
+   - Only pitch deals that exist in the LIVE DEALS CATALOG below. Never invent non-existent products or brands.
+9. STRICT OFF-TOPIC REJECTION:
+   - Politely decline non-shopping questions (cricket, politics, coding, homework) like a committed retail salesman:
+     "Janab main aap ka shopping salesman hoon! Mera kaam aap ke shopping ke paisay bachana hai. Batayein aaj Pakistan ke kis brand par deal chahiye?"
+10. MATCHED DEALS:
+   - Populate "matched_deal_ids" with the IDs of the deals you pitched so the app displays clickable interactive product cards with direct claim buttons.
 
 LIVE DEALS CATALOG FROM DATABASE:
 ${catalogContext || 'No deals currently active.'}
 
 OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:
 {
-  "reply": "Your conversational response explaining the deals, savings, or answers to the user...",
+  "reply": "Your persuasive, energetic, consultative salesman pitch explaining the deals, rupee savings, urgency, and personalized advice...",
   "matched_deal_ids": ["deal-id-1", "deal-id-2"],
   "is_off_topic": false
 }`;

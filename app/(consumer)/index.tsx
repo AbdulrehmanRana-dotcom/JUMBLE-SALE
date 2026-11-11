@@ -34,6 +34,7 @@ import {
   recordDealView,
   toggleDealLike,
   toggleDealSave,
+  SEED_ENGAGEMENT_MAP,
 } from '@/lib/activityStore';
 import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
 import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
@@ -96,6 +97,20 @@ export default function ConsumerHomeScreen() {
     },
     staleTime: 10 * 1000,
   });
+
+  // Dynamic Likes Map for instantaneous Facebook-style count updates
+  const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
+
+  const getDealLikes = (deal: Deal | any) => {
+    if (typeof dynamicLikesMap[deal.id] === 'number') return dynamicLikesMap[deal.id];
+    if (typeof deal.likes_count === 'number') return deal.likes_count;
+    return SEED_ENGAGEMENT_MAP[deal.id]?.likes || 12;
+  };
+
+  const getDealComments = (deal: Deal | any) => {
+    if (typeof deal.comments_count === 'number') return deal.comments_count;
+    return SEED_ENGAGEMENT_MAP[deal.id]?.comments || 2;
+  };
 
   // Fetch Categories (Instant 0ms local fallback + 800ms remote check)
   const { data: categories = DEFAULT_CATEGORIES } = useQuery<Category[]>({
@@ -370,6 +385,9 @@ export default function ConsumerHomeScreen() {
         deal.title,
         deal.brand_id
       );
+      if (typeof res?.count === 'number') {
+        setDynamicLikesMap((prev) => ({ ...prev, [deal.id]: res.count }));
+      }
       if (res.isLiked) {
         toast.show('Liked deal! ❤️', 'success');
       } else {
@@ -545,6 +563,8 @@ export default function ConsumerHomeScreen() {
                         expiresLabel={formatExpiryLabel(item.end_date)}
                         liked={likedDealIds.includes(item.id)}
                         saved={savedDealIds.includes(item.id)}
+                        likesCount={getDealLikes(item)}
+                        commentsCount={getDealComments(item)}
                         onPress={() => handleCardPress(item)}
                         onToggleLike={() => handleLikeToggle(item)}
                         onToggleSave={() => handleSaveToggle(item)}
@@ -701,6 +721,8 @@ export default function ConsumerHomeScreen() {
                 expiresLabel={formatExpiryLabel(item.end_date)}
                 liked={likedDealIds.includes(item.id)}
                 saved={savedDealIds.includes(item.id)}
+                likesCount={getDealLikes(item)}
+                commentsCount={getDealComments(item)}
                 onPress={() => handleCardPress(item)}
                 onToggleLike={() => handleLikeToggle(item)}
                 onToggleSave={() => handleSaveToggle(item)}

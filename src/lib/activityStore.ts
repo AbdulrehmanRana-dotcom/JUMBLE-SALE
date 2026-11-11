@@ -2,7 +2,27 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { interactionLogger } from '@/lib/interactionLogger';
 import { createNotification } from '@/lib/notificationStore';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import {
+  callServerGetInteractions,
+  callServerToggleLike,
+  callServerGetComments,
+  callServerAddComment,
+} from '@/lib/serverApi';
 import type { Deal } from '@/types/database.types';
+
+export const SEED_ENGAGEMENT_MAP: Record<string, { likes: number; comments: number }> = {
+  'd1111111-1111-1111-1111-111111111111': { likes: 124, comments: 18 },
+  'd1111111-1111-1111-1111-222222222222': { likes: 89, comments: 14 },
+  'd1111111-1111-1111-1111-333333333333': { likes: 45, comments: 6 },
+  'd2222222-2222-2222-2222-111111111111': { likes: 142, comments: 26 },
+  'd3333333-3333-3333-3333-111111111111': { likes: 64, comments: 9 },
+  'd4444444-4444-4444-4444-111111111111': { likes: 96, comments: 15 },
+  'd5555555-5555-5555-5555-111111111111': { likes: 185, comments: 34 },
+  'd6666666-6666-6666-6666-111111111111': { likes: 210, comments: 42 },
+  'd7777777-7777-7777-7777-111111111111': { likes: 75, comments: 11 },
+  'd8888888-8888-8888-8888-111111111111': { likes: 110, comments: 19 },
+  'd9999999-9999-9999-9999-111111111111': { likes: 52, comments: 7 },
+};
 
 export interface CommentItem {
   id: string;
@@ -77,6 +97,14 @@ export function sanitizeReviewerName(rawName?: string | null): string {
 // ─── COMMENTS ────────────────────────────────────────────────────────
 export async function getDealComments(dealId: string): Promise<CommentItem[]> {
   try {
+    // 0. Try Node.js Backend Server API first
+    try {
+      const serverComments = await callServerGetComments(dealId);
+      if (serverComments && serverComments.length > 0) {
+        return serverComments;
+      }
+    } catch {}
+
     let rawList: any[] = [];
 
     // 1. Fetch from Supabase comments table only if live backend configured
@@ -172,10 +200,29 @@ export async function addDealComment(
   dealTitle: string = 'Promotion',
   brandId?: string
 ): Promise<CommentItem> {
+  const safeUserName = sanitizeReviewerName(userName);
+
+  // 0. Try Node.js Backend Server API first
+  try {
+    const serverRes = await callServerAddComment(dealId, userId, safeUserName, text);
+    if (serverRes?.comment) {
+      await recordActivityEvent({
+        id: `act-${Date.now()}`,
+        type: 'comment',
+        deal_id: dealId,
+        deal_title: dealTitle,
+        brand_id: brandId,
+        user_id: userId,
+        user_name: safeUserName,
+        details: text.trim(),
+        created_at: serverRes.comment.created_at || new Date().toISOString(),
+      });
+      return serverRes.comment;
+    }
+  } catch {}
+
   const isUUID = (val?: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val || '');
-
-  const safeUserName = sanitizeReviewerName(userName);
 
   let newComm: CommentItem = {
     id: `comm-${Date.now()}`,
@@ -314,6 +361,23 @@ export async function toggleDealLike(
 ): Promise<{ isLiked: boolean; count: number }> {
   try {
     const safeUserId = userId || 'guest';
+
+    // 1. Try Node.js Backend Server API first
+    try {
+      const serverRes = await callServerToggleLike(dealId, safeUserId, userName);
+      if (serverRes) {
+        const userKey = `${LIKES_STORAGE_KEY}_${safeUserId}`;
+        const liked = await getLikedDealIds(safeUserId);
+        const updated = serverRes.isLiked
+          ? Array.from(new Set([...liked, dealId]))
+          : liked.filter((id) => id !== dealId);
+        await AsyncStorage.setItem(userKey, JSON.stringify(updated));
+        const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
+        await AsyncStorage.setItem(countKey, serverRes.likesCount.toString());
+        return { isLiked: serverRes.isLiked, count: serverRes.likesCount };
+      }
+    } catch {}
+
     const isUserUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(safeUserId);
     const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
 
@@ -600,8 +664,19 @@ export async function getSavedDealsList(userId?: string | null): Promise<Deal[]>
 }
 
 export async function getDealLikesCount(dealId: string): Promise<number> {
+  // 1. Try Node.js Backend Server API first
+  try {
+    const serverInteractions = await callServerGetInteractions(dealId);
+    if (serverInteractions && typeof serverInteractions.likes_count === 'number') {
+      return serverInteractions.likes_count;
+    }
+  } catch {}
+
+  const seed = SEED_ENGAGEMENT_MAP[dealId];
+  const seedLikes = seed ? seed.likes : 0;
+
   const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
-  let baseCount = 0;
+  let baseCount = seedLikes;
 
   if (isDealUUID && isSupabaseConfigured) {
     try {
@@ -609,8 +684,8 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
         .select('*', { count: 'exact', head: true })
         .eq('deal_id', dealId);
 
-      if (!error && typeof count === 'number') {
-        baseCount = count;
+      if (!error && typeof count === 'number' && count > 0) {
+        baseCount = Math.max(seedLikes, count);
       }
     } catch {
       // ignore
@@ -637,7 +712,7 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
       }
     }
 
-    const finalCount = Math.max(baseCount, distinctUsersCount);
+    const finalCount = baseCount + distinctUsersCount;
     // Overwrite the single-deal cache so stale numbers are cleaned
     const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
     await AsyncStorage.setItem(countKey, finalCount.toString());
@@ -650,11 +725,22 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
 }
 
 export async function getDealCommentsCount(dealId: string): Promise<number> {
+  // 1. Try Node.js Backend Server API first
+  try {
+    const serverInteractions = await callServerGetInteractions(dealId);
+    if (serverInteractions && typeof serverInteractions.comments_count === 'number') {
+      return serverInteractions.comments_count;
+    }
+  } catch {}
+
+  const seed = SEED_ENGAGEMENT_MAP[dealId];
+  const seedComments = seed ? seed.comments : 0;
+
   try {
     const comments = await getDealComments(dealId);
-    return comments.length;
+    return seedComments + comments.length;
   } catch {
-    return 0;
+    return seedComments;
   }
 }
 

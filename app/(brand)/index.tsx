@@ -29,6 +29,7 @@ import {
   recordDealView,
   toggleDealLike,
   toggleDealSave,
+  SEED_ENGAGEMENT_MAP,
 } from '@/lib/activityStore';
 import { getLocalBrands } from '@/lib/brandStore';
 import { getLocalBrandDeals } from '@/lib/dealStore';
@@ -420,6 +421,8 @@ export default function BrandDashboardScreen() {
                   expiresLabel={formatExpiryLabel(item.end_date)}
                   liked={likedDealIds.includes(item.id)}
                   saved={savedDealIds.includes(item.id)}
+                  likesCount={item.likes_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.likes || 12)}
+                  commentsCount={item.comments_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.comments || 2)}
                   onPress={() => handleCardPress(item)}
                   onToggleLike={() => handleLikeToggle(item)}
                   onToggleSave={() => handleSaveToggle(item)}

@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { getDealEngagement, SEED_ENGAGEMENT_MAP } from './interactionService.js';
 
 export interface DealRecord {
   id: string;
@@ -12,6 +13,8 @@ export interface DealRecord {
   status: 'active' | 'expired' | 'pending';
   views_count?: number;
   claims_count?: number;
+  likes_count?: number;
+  comments_count?: number;
   created_at: string;
   brand?: {
     id: string;
@@ -28,34 +31,38 @@ export interface DealRecord {
 
 export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
   {
-    id: 'd7777777-7777-7777-7777-111111111111',
-    brand_id: 'b7777777-7777-7777-7777-777777777777',
-    brand: { id: 'b7777777-7777-7777-7777-777777777777', name: 'Saeed Ghani', category: 'Beauty & Cosmetics' },
-    title: 'Pure Rose Water & Organic Herbal Oils',
-    description: 'Natural organic skincare and hair regrowth oils. 50% flat discount.',
-    original_price: 2500,
-    discount_price: 1250,
+    id: 'd1111111-1111-1111-1111-111111111111',
+    brand_id: 'b1111111-1111-1111-1111-111111111111',
+    brand: { id: 'b1111111-1111-1111-1111-111111111111', name: 'Khaadi', category: 'Fashion & Apparel' },
+    title: 'Flat 50% Off Summer Lawn Sale',
+    description: 'Enjoy 50% discount across all unstitched 3-piece embroidered lawn suits online and in stores.',
+    original_price: 9990,
+    discount_price: 4995,
     discount_pct: 50,
     status: 'active',
-    views_count: 540,
-    claims_count: 120,
+    views_count: 3400,
+    claims_count: 890,
+    likes_count: 124,
+    comments_count: 18,
     created_at: new Date().toISOString(),
-    category_name: 'Beauty & Cosmetics',
+    category_name: 'Fashion & Apparel',
   },
   {
-    id: 'd6666666-6666-6666-6666-111111111111',
-    brand_id: 'b6666666-6666-6666-6666-666666666666',
-    brand: { id: 'b6666666-6666-6666-6666-666666666666', name: 'Cheezious', category: 'Food & Dining' },
-    title: 'Special 30% Off Crown Crust Pizza & Chicken Wings Combo',
-    description: 'Large Crown Crust pizza, spicy wings, and 1.5L drink at discounted price.',
-    original_price: 2050,
-    discount_price: 1450,
-    discount_pct: 30,
+    id: 'd1111111-1111-1111-1111-222222222222',
+    brand_id: 'b1111111-1111-1111-1111-111111111111',
+    brand: { id: 'b1111111-1111-1111-1111-111111111111', name: 'Khaadi', category: 'Fashion & Apparel' },
+    title: 'Buy 1 Get 1 Free Ready-to-Wear Kurtis',
+    description: 'Special weekend offer on pret wear. Applicable across Lahore, Karachi & Islamabad outlets.',
+    original_price: 6500,
+    discount_price: 3250,
+    discount_pct: 50,
     status: 'active',
-    views_count: 980,
-    claims_count: 310,
+    views_count: 2200,
+    claims_count: 780,
+    likes_count: 89,
+    comments_count: 14,
     created_at: new Date().toISOString(),
-    category_name: 'Food & Dining',
+    category_name: 'Fashion & Apparel',
   },
   {
     id: 'd2222222-2222-2222-2222-111111111111',
@@ -69,21 +76,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 1420,
     claims_count: 450,
-    created_at: new Date().toISOString(),
-    category_name: 'Fashion & Apparel',
-  },
-  {
-    id: 'd1111111-1111-1111-1111-222222222222',
-    brand_id: 'b1111111-1111-1111-1111-111111111111',
-    brand: { id: 'b1111111-1111-1111-1111-111111111111', name: 'Khaadi', category: 'Fashion & Apparel' },
-    title: 'Buy 1 Get 1 Free Ready-to-Wear Kurtis & Bottoms',
-    description: 'Special offer on ready-to-wear kurtis, matching pret trousers and lawn.',
-    original_price: 6500,
-    discount_price: 3250,
-    discount_pct: 50,
-    status: 'active',
-    views_count: 2200,
-    claims_count: 780,
+    likes_count: 142,
+    comments_count: 26,
     created_at: new Date().toISOString(),
     category_name: 'Fashion & Apparel',
   },
@@ -99,6 +93,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 1850,
     claims_count: 610,
+    likes_count: 96,
+    comments_count: 15,
     created_at: new Date().toISOString(),
     category_name: 'Footwear & Accessories',
   },
@@ -114,12 +110,48 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 3100,
     claims_count: 950,
+    likes_count: 185,
+    comments_count: 34,
     created_at: new Date().toISOString(),
     category_name: 'Electronics & Mobiles',
   },
+  {
+    id: 'd6666666-6666-6666-6666-111111111111',
+    brand_id: 'b6666666-6666-6666-6666-666666666666',
+    brand: { id: 'b6666666-6666-6666-6666-666666666666', name: 'Cheezious', category: 'Food & Dining' },
+    title: 'Special 30% Off Crown Crust Pizza & Chicken Wings Combo',
+    description: 'Large Crown Crust pizza, spicy wings, and 1.5L drink at discounted price.',
+    original_price: 2050,
+    discount_price: 1450,
+    discount_pct: 30,
+    status: 'active',
+    views_count: 980,
+    claims_count: 310,
+    likes_count: 210,
+    comments_count: 42,
+    created_at: new Date().toISOString(),
+    category_name: 'Food & Dining',
+  },
+  {
+    id: 'd7777777-7777-7777-7777-111111111111',
+    brand_id: 'b7777777-7777-7777-7777-777777777777',
+    brand: { id: 'b7777777-7777-7777-7777-777777777777', name: 'Saeed Ghani', category: 'Beauty & Cosmetics' },
+    title: 'Pure Rose Water & Organic Herbal Oils',
+    description: 'Natural organic skincare and hair regrowth oils. 50% flat discount.',
+    original_price: 2500,
+    discount_price: 1250,
+    discount_pct: 50,
+    status: 'active',
+    views_count: 540,
+    claims_count: 120,
+    likes_count: 75,
+    comments_count: 11,
+    created_at: new Date().toISOString(),
+    category_name: 'Beauty & Cosmetics',
+  },
 ];
 
-export async function getActiveDeals(limit: number = 30): Promise<DealRecord[]> {
+export async function getActiveDeals(limit: number = 30, userId?: string): Promise<DealRecord[]> {
   try {
     const { data, error } = await supabase
       .from('deals')
@@ -128,14 +160,21 @@ export async function getActiveDeals(limit: number = 30): Promise<DealRecord[]> 
       .order('discount_pct', { ascending: false })
       .limit(limit);
 
-    if (error || !data || data.length === 0) {
-      return FALLBACK_VERIFIED_DEALS.slice(0, limit);
-    }
+    let rawList = (data && data.length > 0) ? data : FALLBACK_VERIFIED_DEALS;
 
-    return (data || []).map((d: any) => ({
-      ...d,
-      category_name: d.category?.name || 'Retail',
-    }));
+    const enriched = await Promise.all(
+      rawList.map(async (d: any) => {
+        const stats = await getDealEngagement(d.id, userId);
+        return {
+          ...d,
+          category_name: d.category?.name || d.category_name || 'Retail',
+          likes_count: stats.likes_count,
+          comments_count: stats.comments_count,
+        };
+      })
+    );
+
+    return enriched.slice(0, limit);
   } catch (err) {
     console.error('[DealService] Fetch exception, using fallback:', err);
     return FALLBACK_VERIFIED_DEALS.slice(0, limit);
@@ -150,11 +189,22 @@ export async function getBrandDeals(brandId: string): Promise<DealRecord[]> {
       .eq('brand_id', brandId)
       .order('created_at', { ascending: false });
 
-    if (error || !data || data.length === 0) {
-      return FALLBACK_VERIFIED_DEALS.filter(d => d.brand_id === brandId);
-    }
+    let rawList = (data && data.length > 0)
+      ? data
+      : FALLBACK_VERIFIED_DEALS.filter(d => d.brand_id === brandId);
 
-    return data || [];
+    const enriched = await Promise.all(
+      rawList.map(async (d: any) => {
+        const stats = await getDealEngagement(d.id);
+        return {
+          ...d,
+          likes_count: stats.likes_count,
+          comments_count: stats.comments_count,
+        };
+      })
+    );
+
+    return enriched;
   } catch (err) {
     console.error('[DealService] Brand fetch exception:', err);
     return FALLBACK_VERIFIED_DEALS.filter(d => d.brand_id === brandId);

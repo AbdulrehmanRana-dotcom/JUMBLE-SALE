@@ -1,13 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { getActiveDeals, getBrandDeals } from '../services/dealService.js';
+import {
+  getDealEngagement,
+  toggleDealLike,
+  getDealComments,
+  addDealComment,
+} from '../services/interactionService.js';
 
 const router = Router();
 
-// GET /api/deals - Fetch active verified deals
+// GET /api/deals - Fetch active verified deals with live likes & comments count
 router.get('/deals', async (req: Request, res: Response) => {
   try {
     const limit = parseInt((req.query.limit as string) || '30', 10);
-    const deals = await getActiveDeals(limit);
+    const userId = (req.query.userId as string) || undefined;
+    const deals = await getActiveDeals(limit, userId);
     res.json({
       success: true,
       count: deals.length,
@@ -18,7 +25,7 @@ router.get('/deals', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/brand/:brandId/deals - Fetch deals belonging to a brand
+// GET /api/brand/:brandId/deals - Fetch deals belonging to a brand with interactions
 router.get('/brand/:brandId/deals', async (req: Request, res: Response) => {
   try {
     const { brandId } = req.params;
@@ -30,6 +37,75 @@ router.get('/brand/:brandId/deals', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to fetch brand deals' });
+  }
+});
+
+// GET /api/deals/:id/interactions - Get total likes and comments for a post
+router.get('/deals/:id/interactions', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req.query.userId as string) || undefined;
+    const stats = await getDealEngagement(id, userId);
+    res.json({
+      success: true,
+      ...stats,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch interactions' });
+  }
+});
+
+// POST /api/deals/:id/like - Toggle like on a post
+router.post('/deals/:id/like', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { userId, userName } = req.body || {};
+    const result = await toggleDealLike(id, userId || 'guest', userName || 'Shopper');
+    res.json({
+      success: true,
+      deal_id: id,
+      isLiked: result.isLiked,
+      likesCount: result.likesCount,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to toggle like' });
+  }
+});
+
+// GET /api/deals/:id/comments - Get comments for a post
+router.get('/deals/:id/comments', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const comments = await getDealComments(id);
+    res.json({
+      success: true,
+      deal_id: id,
+      count: comments.length,
+      comments,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch comments' });
+  }
+});
+
+// POST /api/deals/:id/comments - Add comment to a post
+router.post('/deals/:id/comments', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { userId, userName, text } = req.body || {};
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ success: false, error: 'text is required' });
+    }
+
+    const result = await addDealComment(id, userId || 'guest', userName || 'Shopper', text);
+    res.json({
+      success: true,
+      deal_id: id,
+      comment: result.comment,
+      totalComments: result.totalComments,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to post comment' });
   }
 });
 

@@ -31,6 +31,7 @@ import {
   getSavedDealIds,
   getSavedDealsList,
   toggleDealSave,
+  SEED_ENGAGEMENT_MAP,
   type RecentlyViewedDeal,
 } from '@/lib/activityStore';
 import {
@@ -930,6 +931,8 @@ export default function ConsumerProfileScreen() {
                   imageUri={item.image_urls?.[0]}
                   expiresLabel={`Ends ${new Date(item.end_date).toLocaleDateString()}`}
                   saved={true}
+                  likesCount={item.likes_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.likes || 12)}
+                  commentsCount={item.comments_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.comments || 2)}
                   onPress={() => router.push(`/(consumer)/deal/${item.id}` as any)}
                   onToggleSave={() => handleRemoveSavedDeal(item.id)}
                 />

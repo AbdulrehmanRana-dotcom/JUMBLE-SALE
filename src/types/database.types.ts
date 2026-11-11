@@ -75,6 +75,8 @@ export interface Deal {
   category?: Category;
   is_saved?: boolean;
   is_liked?: boolean;
+  likes_count?: number;
+  comments_count?: number;
   buy_url?: string | null;
   website_url?: string | null;
 }

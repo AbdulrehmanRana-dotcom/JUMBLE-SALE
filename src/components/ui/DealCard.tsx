@@ -24,6 +24,7 @@ export type DealCardProps = {
   liked?: boolean;
   saved?: boolean;
   likesCount?: number;
+  commentsCount?: number;
   onPress?: () => void;
   onToggleLike?: () => void;
   onToggleSave?: () => void;
@@ -45,6 +46,7 @@ export function DealCard({
   liked = false,
   saved = false,
   likesCount,
+  commentsCount,
   onPress,
   onToggleLike,
   onToggleSave,
@@ -54,6 +56,10 @@ export function DealCard({
 }: DealCardProps) {
   // Clean away any leftover "(Copy)" or "(copy)" suffixes cleanly from UI display
   const displayTitle = (title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim();
+
+  // Social Engagement Counts (Facebook Style)
+  const displayLikes = typeof likesCount === 'number' ? likesCount : 0;
+  const displayComments = typeof commentsCount === 'number' ? commentsCount : 0;
 
   // Format price if valid numbers/strings passed (zero dummy stats)
   const formattedPrice =
@@ -151,6 +157,43 @@ export function DealCard({
           </View>
         ) : null}
 
+        {/* Facebook-style Engagement Summary Bar */}
+        <View style={styles.fbEngagementRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${displayLikes} likes`}
+            onPress={(e) => {
+              e.stopPropagation();
+              onToggleLike?.();
+            }}
+            hitSlop={6}
+            style={styles.fbLikesLeft}>
+            <View style={styles.fbHeartBadge}>
+              <Ionicons name="heart" size={10} color="#FFFFFF" />
+            </View>
+            <Text style={styles.fbLikesCountText}>
+              {displayLikes.toLocaleString()} {displayLikes === 1 ? 'like' : 'likes'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${displayComments} comments`}
+            onPress={(e) => {
+              e.stopPropagation();
+              if (onCommentPress) {
+                onCommentPress();
+              } else {
+                onPress?.();
+              }
+            }}
+            hitSlop={6}>
+            <Text style={styles.fbCommentsCountText}>
+              {displayComments.toLocaleString()} {displayComments === 1 ? 'comment' : 'comments'}
+            </Text>
+          </Pressable>
+        </View>
+
         {/* Bottom Actions Row: Like, Comment, Share on Left + Save on Right Corner */}
         <View style={styles.bottomRow}>
           {/* Left Actions: Like, Comment, Share */}
@@ -170,11 +213,9 @@ export function DealCard({
                 size={22}
                 color={liked ? '#FF3040' : '#FFFFFF'}
               />
-              {typeof likesCount === 'number' && likesCount > 0 ? (
-                <Text style={[styles.actionCount, liked && { color: '#FF3040' }]}>
-                  {likesCount}
-                </Text>
-              ) : null}
+              <Text style={[styles.actionCount, liked && { color: '#FF3040', fontWeight: '800' }]}>
+                {displayLikes.toLocaleString()}
+              </Text>
             </Pressable>
 
             {/* 2. Comment Button (Chatbubble) */}
@@ -192,6 +233,9 @@ export function DealCard({
               }}
               style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}>
               <Ionicons name="chatbubble-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.actionCount}>
+                {displayComments.toLocaleString()}
+              </Text>
             </Pressable>
 
             {/* 3. Share Button (Paper-Plane / Arrow) */}
@@ -374,12 +418,50 @@ const styles = StyleSheet.create({
     color: '#64748B',
     textDecorationLine: 'line-through',
   },
+  fbEngagementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 2,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  fbLikesLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  fbHeartBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF3040',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FF3040',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+  },
+  fbLikesCountText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  fbCommentsCountText: {
+    ...typography.caption,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 6,
-    paddingTop: 10,
+    marginTop: 4,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
   },

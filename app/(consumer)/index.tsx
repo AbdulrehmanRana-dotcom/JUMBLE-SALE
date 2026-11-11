@@ -21,6 +21,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { CategoryChip } from '@/components/ui/CategoryChip';
 import { DealCard } from '@/components/ui/DealCard';
+import { CommentsSheetModal } from '@/components/ui/CommentsSheetModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FilterModal, FilterState } from '@/components/ui/FilterModal';
 import { Input } from '@/components/ui/Input';
@@ -104,6 +105,9 @@ export default function ConsumerHomeScreen() {
   // Dynamic Interaction State for real-time Facebook-style live updates
   const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
   const [dynamicCommentsMap, setDynamicCommentsMap] = useState<Record<string, number>>({});
+
+  // Instagram-Style Comments Bottom Sheet Modal State
+  const [commentsModalDeal, setCommentsModalDeal] = useState<Deal | any | null>(null);
 
   // Query live batch interactions from Node.js server
   const { data: batchInteractions, refetch: refetchInteractions } = useQuery<
@@ -603,7 +607,7 @@ export default function ConsumerHomeScreen() {
                         onToggleLike={() => handleLikeToggle(item)}
                         onToggleSave={() => handleSaveToggle(item)}
                         onShare={() => handleShare(item)}
-                        onCommentPress={() => handleCardPress(item)}
+                        onCommentPress={() => setCommentsModalDeal(item)}
                       />
                     </View>
                   ))}
@@ -676,7 +680,7 @@ export default function ConsumerHomeScreen() {
                           onToggleLike={() => handleLikeToggle(item as any)}
                           onToggleSave={() => handleSaveToggle(item as any)}
                           onShare={() => handleShare(item as any)}
-                          onCommentPress={() => handleCardPress(item)}
+                          onCommentPress={() => setCommentsModalDeal(item)}
                         />
                       </View>
                     ))}
@@ -761,7 +765,7 @@ export default function ConsumerHomeScreen() {
                 onToggleLike={() => handleLikeToggle(item)}
                 onToggleSave={() => handleSaveToggle(item)}
                 onShare={() => handleShare(item)}
-                onCommentPress={() => handleCardPress(item)}
+                onCommentPress={() => setCommentsModalDeal(item)}
               />
             </View>
           );
@@ -796,6 +800,21 @@ export default function ConsumerHomeScreen() {
         visible={shareModalOpen}
         onClose={() => setShareModalOpen(false)}
         deal={activeShareDeal}
+      />
+
+      {/* Instagram-Style Comments Bottom Sheet Modal */}
+      <CommentsSheetModal
+        visible={Boolean(commentsModalDeal)}
+        deal={commentsModalDeal}
+        onClose={() => setCommentsModalDeal(null)}
+        onCommentAdded={(newComment, totalComments) => {
+          if (commentsModalDeal) {
+            setDynamicCommentsMap((prev) => ({
+              ...prev,
+              [commentsModalDeal.id]: totalComments,
+            }));
+          }
+        }}
       />
     </SafeAreaView>
   );

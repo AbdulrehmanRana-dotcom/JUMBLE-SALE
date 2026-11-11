@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import { DealCard } from '@/components/ui/DealCard';
+import { CommentsSheetModal } from '@/components/ui/CommentsSheetModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
@@ -66,6 +67,9 @@ export default function BrandDashboardScreen() {
   // Dynamic Interaction State for real-time Facebook-style live updates
   const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
   const [dynamicCommentsMap, setDynamicCommentsMap] = useState<Record<string, number>>({});
+
+  // Instagram-Style Comments Bottom Sheet Modal State
+  const [commentsModalDeal, setCommentsModalDeal] = useState<Deal | any | null>(null);
 
   // Query live batch interactions from Node.js server
   const { data: batchInteractions } = useQuery<
@@ -471,7 +475,7 @@ export default function BrandDashboardScreen() {
                   onToggleLike={() => handleLikeToggle(item)}
                   onToggleSave={() => handleSaveToggle(item)}
                   onShare={() => handleShare(item)}
-                  onCommentPress={() => handleCardPress(item)}
+                  onCommentPress={() => setCommentsModalDeal(item)}
                 />
               </View>
             );
@@ -485,6 +489,21 @@ export default function BrandDashboardScreen() {
         onClose={() => setNotificationsModalOpen(false)}
         role="brand"
         userId={user?.id}
+      />
+
+      {/* Instagram-Style Comments Bottom Sheet Modal */}
+      <CommentsSheetModal
+        visible={Boolean(commentsModalDeal)}
+        deal={commentsModalDeal}
+        onClose={() => setCommentsModalDeal(null)}
+        onCommentAdded={(newComment, totalComments) => {
+          if (commentsModalDeal) {
+            setDynamicCommentsMap((prev) => ({
+              ...prev,
+              [commentsModalDeal.id]: totalComments,
+            }));
+          }
+        }}
       />
     </SafeAreaView>
   );

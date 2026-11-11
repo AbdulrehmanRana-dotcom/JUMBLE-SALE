@@ -255,3 +255,55 @@ export async function callServerBrandAI(
 
   return null;
 }
+
+/**
+ * Get batch interaction counts for all deals from Node.js server.
+ */
+export async function callServerGetBatchInteractions(): Promise<Record<string, { likes_count: number; comments_count: number }> | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+
+    const res = await fetch(`${SERVER_URL}/api/deals/interactions/batch`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.interactions) {
+        return data.interactions;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
+ * Connect to Node.js server SSE stream for real-time interaction updates.
+ */
+export function connectInteractionsSSE(
+  onUpdate: (event: { type: string; deal_id?: string; likes_count?: number; comments_count?: number }) => void
+): () => void {
+  if (typeof EventSource === 'undefined') {
+    return () => {};
+  }
+
+  try {
+    const sse = new EventSource(`${SERVER_URL}/api/deals/interactions/stream`);
+    sse.onmessage = (e) => {
+      try {
+        const parsed = JSON.parse(e.data);
+        onUpdate(parsed);
+      } catch {}
+    };
+
+    return () => {
+      sse.close();
+    };
+  } catch {
+    return () => {};
+  }
+}
+

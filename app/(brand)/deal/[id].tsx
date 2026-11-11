@@ -22,6 +22,7 @@ import { useToast } from '@/components/ui/Toast';
 import {
   addDealComment,
   getDealComments,
+  getDealLikesCount,
   sanitizeReviewerName,
   type CommentItem,
 } from '@/lib/activityStore';
@@ -97,6 +98,13 @@ export default function BrandDealDetailScreen() {
   const { data: comments = [], refetch: refetchComments } = useQuery<CommentItem[]>({
     queryKey: ['brand-deal-comments', id],
     queryFn: () => getDealComments(id || ''),
+    enabled: Boolean(id),
+  });
+
+  // Authentic Likes Count Query (from Node.js server database)
+  const { data: likesCount = 0, refetch: refetchLikesCount } = useQuery<number>({
+    queryKey: ['brand-deal-likes-count', id],
+    queryFn: () => getDealLikesCount(id || ''),
     enabled: Boolean(id),
   });
 
@@ -275,6 +283,22 @@ export default function BrandDealDetailScreen() {
                 </View>
               ) : null}
             </View>
+          </View>
+        </View>
+
+        {/* ─── LIVE ENGAGEMENT SUMMARY (Facebook Style) ─── */}
+        <View style={styles.engagementBar}>
+          <View style={styles.engagementStat}>
+            <Ionicons name={likesCount > 0 ? 'heart' : 'heart-outline'} size={18} color="#FF3B30" />
+            <Text style={styles.engagementText}>
+              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{likesCount}</Text> {likesCount === 1 ? 'like' : 'likes'}
+            </Text>
+          </View>
+          <View style={styles.engagementStat}>
+            <Ionicons name="chatbubble-ellipses" size={17} color="#00FF66" />
+            <Text style={styles.engagementText}>
+              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{comments.length}</Text> {comments.length === 1 ? 'comment' : 'comments'}
+            </Text>
           </View>
         </View>
 
@@ -802,5 +826,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#090A0E',
+  },
+  engagementBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#121622',
+    borderWidth: 1,
+    borderColor: '#202432',
+    borderRadius: radii.md,
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[4],
+  },
+  engagementStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  engagementText: {
+    fontSize: 13,
+    color: '#94A3B8',
   },
 });

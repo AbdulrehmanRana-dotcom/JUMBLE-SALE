@@ -1,16 +1,18 @@
 import { supabase } from '../config/supabase.js';
-import { getDealEngagement, SEED_ENGAGEMENT_MAP } from './interactionService.js';
+import { getDealEngagement } from './interactionService.js';
 
 export interface DealRecord {
   id: string;
   brand_id: string;
   category_id?: string;
   title: string;
-  description: string;
-  original_price: number;
+  description?: string;
+  original_price?: number;
   discount_price?: number;
-  discount_pct: number;
-  status: 'active' | 'expired' | 'pending';
+  discount_pct?: number;
+  promo_code?: string;
+  image_urls?: string[];
+  status: string;
   views_count?: number;
   claims_count?: number;
   likes_count?: number;
@@ -19,14 +21,12 @@ export interface DealRecord {
   brand?: {
     id: string;
     name: string;
-    logo_url?: string;
     category?: string;
-  };
-  category?: {
-    id: string;
-    name: string;
+    logo_url?: string;
+    is_verified?: boolean;
   };
   category_name?: string;
+  is_liked?: boolean;
 }
 
 export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
@@ -42,8 +42,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 3400,
     claims_count: 890,
-    likes_count: 124,
-    comments_count: 18,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Fashion & Apparel',
   },
@@ -59,8 +59,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 2200,
     claims_count: 780,
-    likes_count: 89,
-    comments_count: 14,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Fashion & Apparel',
   },
@@ -76,8 +76,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 1420,
     claims_count: 450,
-    likes_count: 142,
-    comments_count: 26,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Fashion & Apparel',
   },
@@ -93,8 +93,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 1850,
     claims_count: 610,
-    likes_count: 96,
-    comments_count: 15,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Footwear & Accessories',
   },
@@ -110,8 +110,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 3100,
     claims_count: 950,
-    likes_count: 185,
-    comments_count: 34,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Electronics & Mobiles',
   },
@@ -127,8 +127,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 980,
     claims_count: 310,
-    likes_count: 210,
-    comments_count: 42,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Food & Dining',
   },
@@ -144,8 +144,8 @@ export const FALLBACK_VERIFIED_DEALS: DealRecord[] = [
     status: 'active',
     views_count: 540,
     claims_count: 120,
-    likes_count: 75,
-    comments_count: 11,
+    likes_count: 0,
+    comments_count: 0,
     created_at: new Date().toISOString(),
     category_name: 'Beauty & Cosmetics',
   },
@@ -155,29 +155,41 @@ export async function getActiveDeals(limit: number = 30, userId?: string): Promi
   try {
     const { data, error } = await supabase
       .from('deals')
-      .select('*, brand:brands(id, name, logo_url, category), category:categories(id, name)')
+      .select('*, brand:brands(*), category:categories(*)')
       .eq('status', 'active')
-      .order('discount_pct', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(limit);
 
-    let rawList = (data && data.length > 0) ? data : FALLBACK_VERIFIED_DEALS;
+    let deals = !error && Array.isArray(data) && data.length > 0 ? (data as any) : FALLBACK_VERIFIED_DEALS;
 
+    // Attach authentic original engagement for each deal
     const enriched = await Promise.all(
-      rawList.map(async (d: any) => {
+      deals.map(async (d: any) => {
         const stats = await getDealEngagement(d.id, userId);
         return {
           ...d,
           category_name: d.category?.name || d.category_name || 'Retail',
           likes_count: stats.likes_count,
           comments_count: stats.comments_count,
+          is_liked: stats.is_liked,
         };
       })
     );
 
-    return enriched.slice(0, limit);
+    return enriched;
   } catch (err) {
-    console.error('[DealService] Fetch exception, using fallback:', err);
-    return FALLBACK_VERIFIED_DEALS.slice(0, limit);
+    // Enrich fallback deals with original engagement
+    return Promise.all(
+      FALLBACK_VERIFIED_DEALS.map(async (d) => {
+        const stats = await getDealEngagement(d.id, userId);
+        return {
+          ...d,
+          likes_count: stats.likes_count,
+          comments_count: stats.comments_count,
+          is_liked: stats.is_liked,
+        };
+      })
+    );
   }
 }
 
@@ -185,28 +197,26 @@ export async function getBrandDeals(brandId: string): Promise<DealRecord[]> {
   try {
     const { data, error } = await supabase
       .from('deals')
-      .select('*, category:categories(id, name)')
+      .select('*, brand:brands(*), category:categories(*)')
       .eq('brand_id', brandId)
       .order('created_at', { ascending: false });
 
-    let rawList = (data && data.length > 0)
-      ? data
-      : FALLBACK_VERIFIED_DEALS.filter(d => d.brand_id === brandId);
+    let deals = !error && Array.isArray(data) && data.length > 0
+      ? (data as any)
+      : FALLBACK_VERIFIED_DEALS.filter((d) => d.brand_id === brandId);
 
-    const enriched = await Promise.all(
-      rawList.map(async (d: any) => {
+    return Promise.all(
+      deals.map(async (d: any) => {
         const stats = await getDealEngagement(d.id);
         return {
           ...d,
           likes_count: stats.likes_count,
           comments_count: stats.comments_count,
+          is_liked: stats.is_liked,
         };
       })
     );
-
-    return enriched;
-  } catch (err) {
-    console.error('[DealService] Brand fetch exception:', err);
-    return FALLBACK_VERIFIED_DEALS.filter(d => d.brand_id === brandId);
+  } catch {
+    return FALLBACK_VERIFIED_DEALS.filter((d) => d.brand_id === brandId);
   }
 }

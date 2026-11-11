@@ -34,8 +34,11 @@ import {
   recordDealView,
   toggleDealLike,
   toggleDealSave,
-  SEED_ENGAGEMENT_MAP,
 } from '@/lib/activityStore';
+import {
+  callServerGetBatchInteractions,
+  connectInteractionsSSE,
+} from '@/lib/serverApi';
 import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
 import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
 import { getLocalBrandDeals, isDealActive } from '@/lib/dealStore';
@@ -98,18 +101,49 @@ export default function ConsumerHomeScreen() {
     staleTime: 10 * 1000,
   });
 
-  // Dynamic Likes Map for instantaneous Facebook-style count updates
+  // Dynamic Interaction State for real-time Facebook-style live updates
   const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
+  const [dynamicCommentsMap, setDynamicCommentsMap] = useState<Record<string, number>>({});
+
+  // Query live batch interactions from Node.js server
+  const { data: batchInteractions, refetch: refetchInteractions } = useQuery<
+    Record<string, { likes_count: number; comments_count: number }> | null
+  >({
+    queryKey: ['deals-batch-interactions'],
+    queryFn: async () => {
+      return callServerGetBatchInteractions();
+    },
+    refetchInterval: 12000,
+    staleTime: 5000,
+  });
+
+  // Listen for real-time SSE push updates from Node.js backend
+  useEffect(() => {
+    const unsubscribe = connectInteractionsSSE((event) => {
+      if (event.deal_id) {
+        if (typeof event.likes_count === 'number') {
+          setDynamicLikesMap((prev) => ({ ...prev, [event.deal_id!]: event.likes_count! }));
+        }
+        if (typeof event.comments_count === 'number') {
+          setDynamicCommentsMap((prev) => ({ ...prev, [event.deal_id!]: event.comments_count! }));
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const getDealLikes = (deal: Deal | any) => {
     if (typeof dynamicLikesMap[deal.id] === 'number') return dynamicLikesMap[deal.id];
+    if (batchInteractions?.[deal.id]?.likes_count !== undefined) return batchInteractions[deal.id].likes_count;
     if (typeof deal.likes_count === 'number') return deal.likes_count;
-    return SEED_ENGAGEMENT_MAP[deal.id]?.likes || 12;
+    return 0;
   };
 
   const getDealComments = (deal: Deal | any) => {
+    if (typeof dynamicCommentsMap[deal.id] === 'number') return dynamicCommentsMap[deal.id];
+    if (batchInteractions?.[deal.id]?.comments_count !== undefined) return batchInteractions[deal.id].comments_count;
     if (typeof deal.comments_count === 'number') return deal.comments_count;
-    return SEED_ENGAGEMENT_MAP[deal.id]?.comments || 2;
+    return 0;
   };
 
   // Fetch Categories (Instant 0ms local fallback + 800ms remote check)

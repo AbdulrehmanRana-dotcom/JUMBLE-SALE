@@ -45,6 +45,7 @@ import {
 import { getAllActivities, type ActivityEvent } from '@/lib/activityStore';
 import { getDeletedBrandIds, getLocalBrands } from '@/lib/brandStore';
 import { deleteLocalDeal, getLocalBrandDeals, saveLocalDeal } from '@/lib/dealStore';
+import { callServerGetBatchInteractions, connectInteractionsSSE } from '@/lib/serverApi';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import type {
@@ -171,6 +172,33 @@ export default function AdminDashboardScreen() {
 
   // Overview quick toggle
   const [overviewFeedMode, setOverviewFeedMode] = useState<'logs' | 'activities'>('logs');
+
+  // Dynamic batch interactions for live likes and comments
+  const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
+  const [dynamicCommentsMap, setDynamicCommentsMap] = useState<Record<string, number>>({});
+
+  const { data: adminBatchInteractions } = useQuery<
+    Record<string, { likes_count: number; comments_count: number }> | null
+  >({
+    queryKey: ['admin-batch-interactions'],
+    queryFn: () => callServerGetBatchInteractions(),
+    refetchInterval: 12000,
+    staleTime: 5000,
+  });
+
+  useEffect(() => {
+    const unsubscribe = connectInteractionsSSE((event) => {
+      if (event.deal_id) {
+        if (typeof event.likes_count === 'number') {
+          setDynamicLikesMap((prev) => ({ ...prev, [event.deal_id!]: event.likes_count! }));
+        }
+        if (typeof event.comments_count === 'number') {
+          setDynamicCommentsMap((prev) => ({ ...prev, [event.deal_id!]: event.comments_count! }));
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Instagram-style navigation reset function (backs out of all open inspection drawers & dialogs to first page)
   const handleTabResetOrSwitch = (targetTab: AdminTab) => {
@@ -1970,6 +1998,22 @@ export default function AdminDashboardScreen() {
                   </View>
                 </View>
 
+                {/* Live Engagement Row */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 8, paddingVertical: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Ionicons name="heart" size={14} color="#FF3B30" />
+                    <Text style={{ fontSize: 12, color: adminTheme.textSecondary, fontWeight: '600' }}>
+                      {dynamicLikesMap[item.id] ?? adminBatchInteractions?.[item.id]?.likes_count ?? item.likes_count ?? 0} likes
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Ionicons name="chatbubble-ellipses" size={13} color={adminTheme.neon} />
+                    <Text style={{ fontSize: 12, color: adminTheme.textSecondary, fontWeight: '600' }}>
+                      {dynamicCommentsMap[item.id] ?? adminBatchInteractions?.[item.id]?.comments_count ?? item.comments_count ?? 0} comments
+                    </Text>
+                  </View>
+                </View>
+
                 {item.terms && (
                   <Text style={styles.consumerTerms}>
                     Terms: {item.terms}
@@ -2557,6 +2601,22 @@ export default function AdminDashboardScreen() {
                               {deal.description}
                             </Text>
                           ) : null}
+
+                          {/* Live Engagement Row */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginVertical: 4 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                              <Ionicons name="heart" size={13} color="#FF3B30" />
+                              <Text style={{ fontSize: 11, color: adminTheme.textSecondary, fontWeight: '600' }}>
+                                {dynamicLikesMap[deal.id] ?? adminBatchInteractions?.[deal.id]?.likes_count ?? deal.likes_count ?? 0} likes
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                              <Ionicons name="chatbubble-ellipses" size={12} color={adminTheme.neon} />
+                              <Text style={{ fontSize: 11, color: adminTheme.textSecondary, fontWeight: '600' }}>
+                                {dynamicCommentsMap[deal.id] ?? adminBatchInteractions?.[deal.id]?.comments_count ?? deal.comments_count ?? 0} comments
+                              </Text>
+                            </View>
+                          </View>
 
                           <View style={{ flexDirection: 'row', gap: spacing[2], marginTop: spacing[1] }}>
                             <Button

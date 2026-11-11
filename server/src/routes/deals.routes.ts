@@ -5,11 +5,52 @@ import {
   toggleDealLike,
   getDealComments,
   addDealComment,
+  getBatchInteractions,
 } from '../services/interactionService.js';
+import { subscribeToInteractions } from '../db/interactionsDb.js';
 
 const router = Router();
 
-// GET /api/deals - Fetch active verified deals with live likes & comments count
+// GET /api/deals/interactions/batch - Batch get all interaction counts
+router.get('/deals/interactions/batch', async (req: Request, res: Response) => {
+  try {
+    const batch = await getBatchInteractions();
+    res.json({
+      success: true,
+      interactions: batch,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch batch interactions' });
+  }
+});
+
+// GET /api/deals/interactions/stream - Server-Sent Events (SSE) for real-time live sync
+router.get('/deals/interactions/stream', (req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+
+  const unsubscribe = subscribeToInteractions((event) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  });
+
+  // Heartbeat every 25 seconds
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
+// GET /api/deals - Fetch active verified deals with authentic likes & comments count
 router.get('/deals', async (req: Request, res: Response) => {
   try {
     const limit = parseInt((req.query.limit as string) || '30', 10);
@@ -40,7 +81,7 @@ router.get('/brand/:brandId/deals', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/deals/:id/interactions - Get total likes and comments for a post
+// GET /api/deals/:id/interactions - Get total authentic likes and comments for a post
 router.get('/deals/:id/interactions', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -55,7 +96,7 @@ router.get('/deals/:id/interactions', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/deals/:id/like - Toggle like on a post
+// POST /api/deals/:id/like - Toggle like on a post in real-time database
 router.post('/deals/:id/like', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -66,13 +107,14 @@ router.post('/deals/:id/like', async (req: Request, res: Response) => {
       deal_id: id,
       isLiked: result.isLiked,
       likesCount: result.likesCount,
+      commentsCount: result.commentsCount,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to toggle like' });
   }
 });
 
-// GET /api/deals/:id/comments - Get comments for a post
+// GET /api/deals/:id/comments - Get authentic comments for a post from real-time database
 router.get('/deals/:id/comments', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -88,7 +130,7 @@ router.get('/deals/:id/comments', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/deals/:id/comments - Add comment to a post
+// POST /api/deals/:id/comments - Add authentic comment to post in real-time database
 router.post('/deals/:id/comments', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -103,9 +145,10 @@ router.post('/deals/:id/comments', async (req: Request, res: Response) => {
       deal_id: id,
       comment: result.comment,
       totalComments: result.totalComments,
+      likesCount: result.likesCount,
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || 'Failed to post comment' });
+    res.status(500).json({ success: false, error: err?.message || 'Failed to add comment' });
   }
 });
 

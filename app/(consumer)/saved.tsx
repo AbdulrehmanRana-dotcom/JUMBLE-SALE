@@ -21,7 +21,7 @@ import { DealCard } from '@/components/ui/DealCard';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/ui/Header';
 import { useToast } from '@/components/ui/Toast';
-import { getSavedDealsList, toggleDealSave, SEED_ENGAGEMENT_MAP } from '@/lib/activityStore';
+import { getSavedDealsList, toggleDealSave } from '@/lib/activityStore';
 import { getFollowedBrandsList, toggleFollowBrand } from '@/lib/followStore';
 import { checkExpiringSavedDeals } from '@/lib/notificationStore';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -215,8 +215,8 @@ export default function SavedDealsScreen() {
                   imageUri={item.image_urls?.[0]}
                   expiresLabel={`Ends ${new Date(item.end_date).toLocaleDateString()}`}
                   saved={true}
-                  likesCount={item.likes_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.likes || 12)}
-                  commentsCount={item.comments_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.comments || 2)}
+                  likesCount={item.likes_count ?? 0}
+                  commentsCount={item.comments_count ?? 0}
                   onPress={() => router.push(`/(consumer)/deal/${item.id}` as any)}
                   onToggleSave={() => handleRemoveSaved(item.id)}
                 />

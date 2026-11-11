@@ -29,8 +29,11 @@ import {
   recordDealView,
   toggleDealLike,
   toggleDealSave,
-  SEED_ENGAGEMENT_MAP,
 } from '@/lib/activityStore';
+import {
+  callServerGetBatchInteractions,
+  connectInteractionsSSE,
+} from '@/lib/serverApi';
 import { getLocalBrands } from '@/lib/brandStore';
 import { getLocalBrandDeals } from '@/lib/dealStore';
 import { interactionLogger } from '@/lib/interactionLogger';
@@ -59,6 +62,37 @@ export default function BrandDashboardScreen() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  // Dynamic Interaction State for real-time Facebook-style live updates
+  const [dynamicLikesMap, setDynamicLikesMap] = useState<Record<string, number>>({});
+  const [dynamicCommentsMap, setDynamicCommentsMap] = useState<Record<string, number>>({});
+
+  // Query live batch interactions from Node.js server
+  const { data: batchInteractions } = useQuery<
+    Record<string, { likes_count: number; comments_count: number }> | null
+  >({
+    queryKey: ['brand-batch-interactions'],
+    queryFn: async () => {
+      return callServerGetBatchInteractions();
+    },
+    refetchInterval: 12000,
+    staleTime: 5000,
+  });
+
+  // Listen for real-time SSE push updates from Node.js backend
+  useEffect(() => {
+    const unsubscribe = connectInteractionsSSE((event) => {
+      if (event.deal_id) {
+        if (typeof event.likes_count === 'number') {
+          setDynamicLikesMap((prev) => ({ ...prev, [event.deal_id!]: event.likes_count! }));
+        }
+        if (typeof event.comments_count === 'number') {
+          setDynamicCommentsMap((prev) => ({ ...prev, [event.deal_id!]: event.comments_count! }));
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Instagram-style: Tapping Home in bottom nav resets search & category filters and scrolls to top
   useEffect(() => {
@@ -421,8 +455,18 @@ export default function BrandDashboardScreen() {
                   expiresLabel={formatExpiryLabel(item.end_date)}
                   liked={likedDealIds.includes(item.id)}
                   saved={savedDealIds.includes(item.id)}
-                  likesCount={item.likes_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.likes || 12)}
-                  commentsCount={item.comments_count ?? (SEED_ENGAGEMENT_MAP[item.id]?.comments || 2)}
+                  likesCount={
+                    dynamicLikesMap[item.id] ??
+                    batchInteractions?.[item.id]?.likes_count ??
+                    item.likes_count ??
+                    0
+                  }
+                  commentsCount={
+                    dynamicCommentsMap[item.id] ??
+                    batchInteractions?.[item.id]?.comments_count ??
+                    item.comments_count ??
+                    0
+                  }
                   onPress={() => handleCardPress(item)}
                   onToggleLike={() => handleLikeToggle(item)}
                   onToggleSave={() => handleSaveToggle(item)}

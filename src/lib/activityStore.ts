@@ -10,19 +10,8 @@ import {
 } from '@/lib/serverApi';
 import type { Deal } from '@/types/database.types';
 
-export const SEED_ENGAGEMENT_MAP: Record<string, { likes: number; comments: number }> = {
-  'd1111111-1111-1111-1111-111111111111': { likes: 124, comments: 18 },
-  'd1111111-1111-1111-1111-222222222222': { likes: 89, comments: 14 },
-  'd1111111-1111-1111-1111-333333333333': { likes: 45, comments: 6 },
-  'd2222222-2222-2222-2222-111111111111': { likes: 142, comments: 26 },
-  'd3333333-3333-3333-3333-111111111111': { likes: 64, comments: 9 },
-  'd4444444-4444-4444-4444-111111111111': { likes: 96, comments: 15 },
-  'd5555555-5555-5555-5555-111111111111': { likes: 185, comments: 34 },
-  'd6666666-6666-6666-6666-111111111111': { likes: 210, comments: 42 },
-  'd7777777-7777-7777-7777-111111111111': { likes: 75, comments: 11 },
-  'd8888888-8888-8888-8888-111111111111': { likes: 110, comments: 19 },
-  'd9999999-9999-9999-9999-111111111111': { likes: 52, comments: 7 },
-};
+// Real database baseline: 0 likes, 0 comments (no fictitious seeds)
+export const SEED_ENGAGEMENT_MAP: Record<string, { likes: number; comments: number }> = {};
 
 export interface CommentItem {
   id: string;
@@ -664,7 +653,7 @@ export async function getSavedDealsList(userId?: string | null): Promise<Deal[]>
 }
 
 export async function getDealLikesCount(dealId: string): Promise<number> {
-  // 1. Try Node.js Backend Server API first
+  // 1. Try Node.js Backend Server API first (Authentic live count)
   try {
     const serverInteractions = await callServerGetInteractions(dealId);
     if (serverInteractions && typeof serverInteractions.likes_count === 'number') {
@@ -672,11 +661,8 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
     }
   } catch {}
 
-  const seed = SEED_ENGAGEMENT_MAP[dealId];
-  const seedLikes = seed ? seed.likes : 0;
-
   const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
-  let baseCount = seedLikes;
+  let baseCount = 0;
 
   if (isDealUUID && isSupabaseConfigured) {
     try {
@@ -684,8 +670,8 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
         .select('*', { count: 'exact', head: true })
         .eq('deal_id', dealId);
 
-      if (!error && typeof count === 'number' && count > 0) {
-        baseCount = Math.max(seedLikes, count);
+      if (!error && typeof count === 'number') {
+        baseCount = count;
       }
     } catch {
       // ignore
@@ -712,8 +698,7 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
       }
     }
 
-    const finalCount = baseCount + distinctUsersCount;
-    // Overwrite the single-deal cache so stale numbers are cleaned
+    const finalCount = Math.max(baseCount, distinctUsersCount);
     const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
     await AsyncStorage.setItem(countKey, finalCount.toString());
     return finalCount;
@@ -725,7 +710,7 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
 }
 
 export async function getDealCommentsCount(dealId: string): Promise<number> {
-  // 1. Try Node.js Backend Server API first
+  // 1. Try Node.js Backend Server API first (Authentic live count)
   try {
     const serverInteractions = await callServerGetInteractions(dealId);
     if (serverInteractions && typeof serverInteractions.comments_count === 'number') {
@@ -733,14 +718,11 @@ export async function getDealCommentsCount(dealId: string): Promise<number> {
     }
   } catch {}
 
-  const seed = SEED_ENGAGEMENT_MAP[dealId];
-  const seedComments = seed ? seed.comments : 0;
-
   try {
     const comments = await getDealComments(dealId);
-    return seedComments + comments.length;
+    return comments.length;
   } catch {
-    return seedComments;
+    return 0;
   }
 }
 
@@ -755,6 +737,18 @@ export async function getDealSharesCount(dealId: string): Promise<number> {
 }
 
 export async function getDealInteractions(dealId: string): Promise<{ likes: number; comments: number; shares: number }> {
+  try {
+    const serverInteractions = await callServerGetInteractions(dealId);
+    if (serverInteractions) {
+      const shares = await getDealSharesCount(dealId);
+      return {
+        likes: serverInteractions.likes_count,
+        comments: serverInteractions.comments_count,
+        shares,
+      };
+    }
+  } catch {}
+
   const [likes, comments, shares] = await Promise.all([
     getDealLikesCount(dealId),
     getDealCommentsCount(dealId),

@@ -104,8 +104,9 @@ export async function processShopperAIQuery(
 
     if (affordableDeals.length > 0) {
       const topPick = affordableDeals[0];
-      const topPrice = topPick.discount_price || Math.round(topPick.original_price * (1 - topPick.discount_pct / 100));
-      const savings = topPick.original_price - topPrice;
+      const origPrice = topPick.original_price || topPick.discount_price || 0;
+      const topPrice = topPick.discount_price || (origPrice && topPick.discount_pct ? Math.round(origPrice * (1 - topPick.discount_pct / 100)) : origPrice);
+      const savings = Math.max(0, origPrice - topPrice);
       const bName = topPick.brand?.name || 'Brand';
 
       if (isExplicitShow) {
@@ -126,15 +127,19 @@ export async function processShopperAIQuery(
     } else {
       // Nothing under this budget! Sort ascending to find closest lowest options
       const sortedByPrice = [...deals].sort((a, b) => {
-        const pA = a.discount_price || Math.round(a.original_price * (1 - a.discount_pct / 100));
-        const pB = b.discount_price || Math.round(b.original_price * (1 - b.discount_pct / 100));
+        const origA = a.original_price || a.discount_price || 0;
+        const origB = b.original_price || b.discount_price || 0;
+        const pA = a.discount_price || (origA && a.discount_pct ? Math.round(origA * (1 - a.discount_pct / 100)) : origA);
+        const pB = b.discount_price || (origB && b.discount_pct ? Math.round(origB * (1 - b.discount_pct / 100)) : origB);
         return pA - pB;
       });
 
       const lowest = sortedByPrice[0];
       const secondLowest = sortedByPrice[1];
-      const lowestP = lowest ? (lowest.discount_price || Math.round(lowest.original_price * (1 - lowest.discount_pct / 100))) : 0;
-      const secondP = secondLowest ? (secondLowest.discount_price || Math.round(secondLowest.original_price * (1 - secondLowest.discount_pct / 100))) : 0;
+      const lowestOrig = lowest?.original_price || lowest?.discount_price || 0;
+      const secondOrig = secondLowest?.original_price || secondLowest?.discount_price || 0;
+      const lowestP = lowest ? (lowest.discount_price || (lowestOrig && lowest.discount_pct ? Math.round(lowestOrig * (1 - lowest.discount_pct / 100)) : lowestOrig)) : 0;
+      const secondP = secondLowest ? (secondLowest.discount_price || (secondOrig && secondLowest.discount_pct ? Math.round(secondOrig * (1 - secondLowest.discount_pct / 100)) : secondOrig)) : 0;
       const lowestBrand = lowest?.brand?.name || 'Brand';
       const secondBrand = secondLowest?.brand?.name || 'Brand';
       const diff = lowestP > maxBudget ? lowestP - maxBudget : 0;

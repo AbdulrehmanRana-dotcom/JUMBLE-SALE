@@ -382,23 +382,23 @@ export async function createNotification(
         if (payload.aggregation_key.startsWith('like_')) {
           aggregatedTitle = 'New Likes on Your Promotion! ❤️';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} aur ${combinedActors[1]} ne aapki promotion ko like kiya hai.`;
+            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} liked your promotion.`;
           } else {
-            aggregatedBody = `${combinedActors[0]} aur ${newCount - 1} doosron ne aapki promotion ko like kiya hai.`;
+            aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others liked your promotion.`;
           }
         } else if (payload.aggregation_key.startsWith('follow_')) {
           aggregatedTitle = 'New Followers Alert! 👤';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} aur ${combinedActors[1]} ne aapke brand ko follow karna shuru kiya hai.`;
+            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} started following your brand.`;
           } else {
-            aggregatedBody = `${combinedActors[0]} aur ${newCount - 1} doosron ne aapke brand ko follow karna shuru kiya hai.`;
+            aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others started following your brand.`;
           }
         } else if (payload.aggregation_key.startsWith('comment_')) {
           aggregatedTitle = 'New Reviews on Promotion 💬';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} aur ${combinedActors[1]} ne reviews post kiye hain.`;
+            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} posted reviews.`;
           } else {
-            aggregatedBody = `${combinedActors[0]} aur ${newCount - 1} doosron ne reviews post kiye hain.`;
+            aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others posted reviews.`;
           }
         }
 
@@ -544,7 +544,7 @@ export async function checkExpiringSavedDeals(
             userId,
             category: 'deal',
             title: `Deal Expiring Soon: ${deal.title} ⏳`,
-            body: `Aapki saved promotion "${deal.title}" agle 48 ghanton me expire hone wali hai. Grab it before it ends!`,
+            body: `Your saved promotion "${deal.title}" is expiring in the next 48 hours. Grab it before it ends!`,
             deal_id: deal.id,
             brand_id: deal.brand_id,
             action_url: `/(consumer)/deal/${deal.id}`,

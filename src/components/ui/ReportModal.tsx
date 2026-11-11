@@ -65,7 +65,7 @@ export function ReportModal({ visible, dealId, onClose }: ReportModalProps) {
             dealId,
             category: 'system',
             title: 'Report Received 🛡️',
-            body: `Aapki report (${selectedReason}) submit ho gayi hai. Admin team deal ka jaiza le rahi hai.`,
+            body: `Your report (${selectedReason}) has been submitted. The Admin team is reviewing the promotion.`,
           });
         }
 

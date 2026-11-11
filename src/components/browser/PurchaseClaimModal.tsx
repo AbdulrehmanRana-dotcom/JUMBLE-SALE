@@ -67,7 +67,7 @@ export function PurchaseClaimModal({
         attribution_method: 'in_app_webview',
       });
 
-      toast.show('🎉 Mubarak! Shopping record saved to your history!', 'success');
+      toast.show('🎉 Congratulations! Shopping record saved to your history!', 'success');
       onSuccess(order);
       onClose();
     } catch (err: any) {

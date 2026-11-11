@@ -39,13 +39,13 @@ interface ChatMessage {
 }
 
 const QUICK_PROMPTS = [
-  '📊 Mera store status aur kitni deals live hain?',
-  '💡 Summer Collection ka catchy title do',
-  '💰 Rs. 5,000 par 30% discount ka price calculate karo',
-  '⏳ Meri pending deal kab approve hogi?',
-  '📝 Premium product description likho',
-  '📢 WhatsApp customer broadcast message likho',
-  '📜 7-day exchange ke terms & conditions bnao',
+  '📊 What is my store status & how many deals are live?',
+  '💡 Suggest a catchy title for Summer Collection',
+  '💰 Calculate 30% discount on Rs. 5,000',
+  '⏳ When will my pending deal be approved?',
+  '📝 Write a premium product description',
+  '📢 Draft a WhatsApp customer broadcast message',
+  '📜 Create terms & conditions for 7-day exchange',
 ];
 
 let messageCounter = 0;
@@ -98,21 +98,21 @@ export default function BrandAgentScreen() {
     {
       id: 'msg-welcome',
       sender: 'assistant',
-      text: `Walaikum Assalam Janab! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Executive Brand Assistant.
+      text: `Hello! 👋 I am **Bhai** — your Jumble Sale AI Executive Brand Assistant.
 
-Main aapke brand **${brandDisplayName}** ke liye in ahem umoor mein hazir hoon:
+I am here to assist your brand **${brandDisplayName}** with:
 • 📊 Real-Time Store Status & Pending Reviews
 • 🏷️ Catchy & Viral Titles (Urgency, Value & Luxury)
 • 📝 High-Converting Product Descriptions
 • 💰 Smart Pricing & Psychological Charm Prices (.999)
-• 📜 Terms & Conditions aur QA verification rules
-• 📢 WhatsApp Broadcast & Instagram Captions
+• 📜 Terms & Conditions and QA verification rules
+• 📢 WhatsApp Broadcasts & Social Captions
 
-Bataiye Janab, aaj kis maslay ya promotion mein aapki madad karoon?`,
+How can I help boost your sales and promotions today?`,
       timestamp: 'Online',
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
       ],
     },
   ]);
@@ -224,11 +224,11 @@ Bataiye Janab, aaj kis maslay ya promotion mein aapki madad karoon?`,
               {
                 id: getNextId('welcome-reset'),
                 sender: 'assistant',
-                text: `Walaikum Assalam Janab! 👋 Mera naam **Bhai** hai — aapka Jumble Sale AI Executive Assistant. Store status ya promotions ke mutalliq kuch bhi poochhein!`,
+                text: `Hello! 👋 I am **Bhai** — your Jumble Sale AI Executive Assistant. Feel free to ask anything about your store status or promotions!`,
                 timestamp: 'Online',
                 actions: [
-                  { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-                  { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+                  { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+                  { label: '📊 View Active Posts', route: '/(brand)/posts' },
                 ],
               },
             ]);

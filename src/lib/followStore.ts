@@ -163,7 +163,7 @@ export async function toggleFollowBrand(
         brandId,
         category: 'brand',
         title: `Following ${resolvedBrandName} 🔔`,
-        body: `Aap ab ${resolvedBrandName} ko follow kar rahe hain. Inki har new promotion ka notification aapko milega.`,
+        body: `You are now following ${resolvedBrandName}. You will receive notifications for all their new promotions.`,
         action_url: `/(consumer)/brand/${brandId}`,
       });
     } catch (notifErr) {

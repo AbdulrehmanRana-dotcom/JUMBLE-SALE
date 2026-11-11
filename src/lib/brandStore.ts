@@ -293,7 +293,7 @@ export async function saveBrandRegistrationLocally(brand: Partial<Brand>): Promi
         brand_id: newBrand.id,
         category: 'moderation',
         title: 'New Brand KYC Pending Review 📋',
-        body: `Brand "${newBrand.name}" ne registration aur verification documents submit kiye hain.`,
+        body: `Brand "${newBrand.name}" submitted registration and verification documents.`,
         action_url: 'brands_queue',
       });
 
@@ -304,7 +304,7 @@ export async function saveBrandRegistrationLocally(brand: Partial<Brand>): Promi
         brand_id: newBrand.id,
         category: 'system',
         title: 'Registration Submitted ⏳',
-        body: `Aapki brand registration "${newBrand.name}" submit ho chuki hai. Admin verification complete hone par verified badge mil jaye ga.`,
+        body: `Your brand registration "${newBrand.name}" has been submitted. You will receive a verified badge once Admin verification is complete.`,
         action_url: '/(brand)/pending',
       });
     } catch (notifErr) {

@@ -33,13 +33,13 @@ interface ChatItem {
 }
 
 const SUGGESTED_QUESTIONS = [
-  '🎯 Rs. 3,000 ke budget mein best dikhao',
-  '👗 Khaadi & Gul Ahmed par sab se bari sale',
-  '🔥 50%+ OFF Flash Deals jo jaldi khatam ho rahi hain',
-  '👟 Bata shoes aur sneakers par best sale',
-  '🍔 Fast food aur dinner ke saste combos',
-  '📱 Sastay budget smartphones & gadgets',
-  '💡 Mujhe sasta alternative dikhao',
+  '🎯 Best deals under Rs. 3,000 budget',
+  '👗 Biggest sales on Khaadi & Gul Ahmed',
+  '🔥 50%+ OFF Flash Deals ending soon',
+  '👟 Best discounts on Bata shoes & sneakers',
+  '🍔 Affordable fast food & dinner deals',
+  '📱 Budget-friendly smartphones & gadgets',
+  '💡 Show me the best value alternatives',
 ];
 
 let messageCounter = 0;
@@ -70,7 +70,7 @@ export default function AIAssistantScreen() {
             id: 'welcome-guest',
             role: 'assistant',
             content:
-              'Salam Janab! 🛍️ Main hoon aapka Jumble Personal Shopping Salesman aur Bachat Advisor!\n\nPakistan bhar ke verified official brands par sab se sasti deals dhoondne ke liye mujh se mashwara karein. Batayein aaj kis cheez ki shopping ka irada hai — kapray, branded shoes, naya smartphone, ya shaam ka dinner? Aur budget kitna hai?',
+              'Hello! 🛍️ I am your Jumble Personal Shopping Salesman & Savings Advisor!\n\nAsk me anytime to discover the best authentic deals across verified official brands in Pakistan. What are you looking to buy today — apparel, shoes, a smartphone, or dinner? And what is your budget?',
             created_at: new Date().toISOString(),
           },
         ]);
@@ -121,7 +121,7 @@ export default function AIAssistantScreen() {
               id: 'welcome',
               role: 'assistant',
               content:
-                'Salam Janab! 🛍️ Main hoon aapka Jumble Personal Shopping Salesman aur Bachat Advisor!\n\nPakistan bhar ke verified official brands par sab se sasti deals dhoondne ke liye mujh se mashwara karein. Batayein aaj kis cheez ki shopping ka irada hai — kapray, branded shoes, naya smartphone, ya shaam ka dinner? Aur budget kitna hai?',
+                'Hello! 🛍️ I am your Jumble Personal Shopping Salesman & Savings Advisor!\n\nAsk me anytime to discover the best authentic deals across verified official brands in Pakistan. What are you looking to buy today — apparel, shoes, a smartphone, or dinner? And what is your budget?',
               created_at: new Date().toISOString(),
             },
           ]);
@@ -247,7 +247,7 @@ export default function AIAssistantScreen() {
             <View>
               <Text style={styles.headerTitle}>Jumble AI Personal Salesman</Text>
               <Text style={styles.headerSubtitle}>
-                Bachat Advisor • Verified Brand Partners • Exclusive Savings
+                Savings Advisor • Verified Brand Partners • Exclusive Discounts
               </Text>
             </View>
           </View>
@@ -351,7 +351,7 @@ export default function AIAssistantScreen() {
                                     {savings > 0 && (
                                       <View style={styles.savingsBadge}>
                                         <Text style={styles.savingsBadgeText}>
-                                          Bachat Rs. {savings.toLocaleString()}
+                                          Save Rs. {savings.toLocaleString()}
                                         </Text>
                                       </View>
                                     )}

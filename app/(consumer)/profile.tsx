@@ -692,7 +692,7 @@ export default function ConsumerProfileScreen() {
             <EmptyState
               icon="bag-check-outline"
               title="No Purchases Tracked Yet"
-              description="Jab aap Jumble Sale par kisi post ko dekh kar brand ki website se shopping karein ge, toh aapka shopping record aur verified discount yahan show hoga!"
+              description="When you shop on a brand's website through Jumble Sale, your verified shopping record and savings will appear here!"
               actionLabel="Explore Active Deals"
               onAction={() => {
                 setActiveView('menu');

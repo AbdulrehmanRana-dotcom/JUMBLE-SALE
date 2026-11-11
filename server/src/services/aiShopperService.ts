@@ -10,12 +10,12 @@ export interface ShopperResponse {
 export function sanitizeSalesmanJargon(text: string): string {
   if (!text) return '';
   return text
-    .replace(/\blive database\b/gi, 'hamare platform')
-    .replace(/\bdatabase mein\b/gi, 'hamare paas')
+    .replace(/\blive database\b/gi, 'our marketplace')
+    .replace(/\bdatabase mein\b/gi, 'in our platform')
     .replace(/\bdatabase\b/gi, 'verified brand partners')
     .replace(/\bsystem\b/gi, 'platform')
     .replace(/\brecords\b/gi, 'brand offers')
-    .replace(/\bquery\b/gi, 'sawal');
+    .replace(/\bquery\b/gi, 'question');
 }
 
 export async function processShopperAIQuery(
@@ -47,7 +47,7 @@ export async function processShopperAIQuery(
 
   if (offTopicKeywords.some(rgx => rgx.test(lower)) && !isShoppingWord) {
     return {
-      reply: "Sorry, I can't answer that. Main sirf Jumble Sale aur aapke shopping deals aur bachat ke liye hazir hoon! 🛍️ Batayein aaj Pakistan ke kis brand ya product par discount dekhna hai?",
+      reply: "Sorry, I can only help with shopping deals, discounts, and verified brand promotions on Jumble Sale! 🛍️ Which brand or category are you looking for today?",
       deals: [],
       is_off_topic: true,
       suggested_chips: [
@@ -60,12 +60,12 @@ export async function processShopperAIQuery(
   }
 
   // 4. Greetings
-  if (/\b(?:salam|assalam|aoa|aslamu)\b/i.test(lower) && !isShoppingWord) {
+  if (/\b(?:salam|assalam|aoa|aslamu|hello|hi|hey)\b/i.test(lower) && !isShoppingWord) {
     return {
-      reply: 'Walaikum Assalam Janab! Main aap ki kya madad kar sakta hoon? 🛍️\n\nBatayein aaj Pakistan ke kis brand ya category par shopping ka irada hai — kapray, branded shoes, naya smartphone ya shaam ka khana? Aur budget kitna zehan mein hai?\n\nAap batayein, main foran behtareen verified deals nikaal deta hoon!',
+      reply: 'Hello! How can I assist you with your shopping today? 🛍️\n\nTell me which brand or category you are exploring — apparel, footwear, smartphones, or food deals? And what budget do you have in mind?\n\nLet me know and I will instantly bring up the best verified discounts for you!',
       deals: [],
       is_off_topic: false,
-      suggested_chips: ['👗 Khaadi Deals Dikhao', '👟 Bata Shoes Dikhao', '🍕 Cheezious Pizza Dikhao', '🎯 Rs. 3,000 Budget Deals'],
+      suggested_chips: ['👗 Show Khaadi Deals', '👟 Show Bata Shoes', '🍕 Show Cheezious Pizza', '🎯 Rs. 3,000 Budget Deals'],
     };
   }
 
@@ -79,17 +79,17 @@ export async function processShopperAIQuery(
 
     if (isExplicitShow) {
       return {
-        reply: "Janab! Trousers aur bottoms ke liye hamare verified brand **Outfitters** (streetwear pants aur denim par 40% OFF) aur **Khaadi** (matching pret trousers par 50% tak bachat) par active deals yeh rahi hain:",
+        reply: "Here are the top active promotions for trousers and bottoms from our verified brand partners **Outfitters** (streetwear denim and pants up to 40% OFF) and **Khaadi** (matching pret trousers with up to 50% savings):",
         deals: trouserDeals.slice(0, 4),
         is_off_topic: false,
-        suggested_chips: ['👖 Outfitters Trousers Dikhao', '👗 Khaadi Pret Bottoms', '👟 Matching Bata Shoes'],
+        suggested_chips: ['👖 Outfitters Trousers', '👗 Khaadi Pret Bottoms', '👟 Matching Bata Shoes'],
       };
     } else {
       return {
-        reply: "Janab! Trousers aur pants bilkul available hain! Hamare verified registered brand **Outfitters** par streetwear trousers, cargo aur denim jeans par up to 40% flat discount chal raha hai (fresh collection sirf Rs. 2,994 mein), aur **Khaadi** par matching pret trousers aur bottoms par 50% tak bachat mojood hai!\n\nKya main aapko Outfitters aur Khaadi ke trousers aur bottoms ki verified deals aur posts dikhaoon?",
+        reply: "Yes, trousers and bottoms are actively available! Our verified partner **Outfitters** currently offers up to 40% flat discount on streetwear cargo and denim pants (starting at Rs. 2,994), and **Khaadi** has up to 50% savings on pret trousers!\n\nWould you like me to display these verified trousers and pants deals for you?",
         deals: [],
         is_off_topic: false,
-        suggested_chips: ['👖 Trousers Deals Dikhao', '👕 Outfitters Sale Dikhao', '👗 Khaadi Bottoms Dikhao'],
+        suggested_chips: ['👖 Show Trousers Deals', '👕 View Outfitters Sale', '👗 View Khaadi Bottoms'],
       };
     }
   }
@@ -111,17 +111,17 @@ export async function processShopperAIQuery(
 
       if (isExplicitShow) {
         return {
-          reply: `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein verified products available hain. Meri sab se bari recommendation ${bName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein mil raha hai (seedha Rs. ${savings.toLocaleString()} ki bachat!). Neechay diye gaye cards se foran claim karein:`,
+          reply: `Great news! Verified products are available within your budget of Rs. ${maxBudget.toLocaleString()}. Our top recommendation is "${topPick.title}" by ${bName} at just Rs. ${topPrice.toLocaleString()} (saving Rs. ${savings.toLocaleString()}!). Check out the deals below:`,
           deals: affordableDeals.slice(0, 4),
           is_off_topic: false,
-          suggested_chips: ['⚡ Claim Deal', '💰 Aur Sasta Dikhao'],
+          suggested_chips: ['⚡ Claim Deal', '💰 Show Cheaper Deals'],
         };
       } else {
         return {
-          reply: `Befikar rahein Janab! Aapke Rs. ${maxBudget.toLocaleString()} ke budget mein verified products available hain! Sab se behtareen option ${bName} ka "${topPick.title}" hai jo sirf Rs. ${topPrice.toLocaleString()} mein Rs. ${savings.toLocaleString()} ki direct bachat ke sath mil raha hai!\n\nKya main aapko is budget ki deals aur posts dikhaoon?`,
+          reply: `Great news! Verified products are available within your budget of Rs. ${maxBudget.toLocaleString()}! The top deal is "${topPick.title}" by ${bName} for just Rs. ${topPrice.toLocaleString()} with Rs. ${savings.toLocaleString()} in direct savings.\n\nWould you like me to show you the promotions for this budget?`,
           deals: [],
           is_off_topic: false,
-          suggested_chips: [`💰 Rs. ${maxBudget.toLocaleString()} Deals Dikhao`, '👗 Fashion in Budget'],
+          suggested_chips: [`💰 Show Rs. ${maxBudget.toLocaleString()} Deals`, '👗 Fashion in Budget'],
         };
       }
     } else {
@@ -145,13 +145,13 @@ export async function processShopperAIQuery(
       const diff = lowestP > maxBudget ? lowestP - maxBudget : 0;
 
       return {
-        reply: `Janab! Filhal hamare platform par Rs. ${maxBudget.toLocaleString()} se neechay koi product ya verified deal available nahi hai.\n\nHamare paas is waqt sab se sasti live verified offer ${lowestBrand} par hai jo sirf Rs. ${lowestP.toLocaleString()} mein mil rahi hai ("${lowest?.title || 'Offer'}" - ${lowest?.discount_pct || 0}% OFF!)` +
-          (secondLowest ? `, aur doosra sasta option ${secondBrand} ki deal Rs. ${secondP.toLocaleString()} mein hai` : '') +
-          (diff > 0 ? ` (sirf Rs. ${diff.toLocaleString()} ka farq hai)` : '') +
-          `.\n\nKya main aapko in sab se sasti verified deals ki posts dikhaoon?`,
+        reply: `Currently, there are no live products under Rs. ${maxBudget.toLocaleString()} on our platform.\n\nOur lowest priced verified deal right now is from ${lowestBrand} at Rs. ${lowestP.toLocaleString()} ("${lowest?.title || 'Offer'}" - ${lowest?.discount_pct || 0}% OFF!)` +
+          (secondLowest ? `, followed by ${secondBrand} at Rs. ${secondP.toLocaleString()}` : '') +
+          (diff > 0 ? ` (just Rs. ${diff.toLocaleString()} difference)` : '') +
+          `.\n\nWould you like me to display these lowest-priced verified deals?`,
         deals: isExplicitShow ? [lowest, secondLowest].filter(Boolean) : [],
         is_off_topic: false,
-        suggested_chips: [`⚡ Rs. ${lowestP.toLocaleString()} Deal Dikhao`, '💰 Sab Se Sasti Deals'],
+        suggested_chips: [`⚡ Show Rs. ${lowestP.toLocaleString()} Deal`, '💰 Best Value Deals'],
       };
     }
   }
@@ -159,10 +159,10 @@ export async function processShopperAIQuery(
   // 7. Generic Fallback
   return {
     reply: isExplicitShow
-      ? 'Janab! Hamare registered official brand partners par yeh garam offers chal rahi hain jahan aap ke hazaron rupay bach sakte hain. Neechay diye gaye cards dekhein:'
-      : 'Janab! Hamare registered official brand partners par is waqt 30% se 70% tak zabardast discounts chal rahe hain. Batayein Janab, aapko kapray, jootay, mobile ya food ki posts dikhaoon?',
+      ? 'Here are the hottest verified promotions from our official brand partners where you can save significantly. Check out the cards below:'
+      : 'Our official brand partners currently feature exclusive discounts ranging from 30% to 70% OFF! Which category would you like to explore — apparel, footwear, electronics, or food?',
     deals: isExplicitShow ? deals.slice(0, 4) : [],
     is_off_topic: false,
-    suggested_chips: ['👗 Khaadi Deals Dikhao', '🍕 Cheezious Pizza Dikhao', '👟 Bata Shoes Dikhao'],
+    suggested_chips: ['👗 Show Khaadi Deals', '🍕 Show Pizza Deals', '👟 Show Shoes Deals'],
   };
 }

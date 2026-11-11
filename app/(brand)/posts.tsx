@@ -138,7 +138,7 @@ export default function BrandPostsScreen() {
   const [originalPrice, setOriginalPrice] = useState('');
   const [discountPct, setDiscountPct] = useState('20');
   const [dealDescription, setDealDescription] = useState('');
-  // 1. Cover Photo (Compulsory / Lazmi)
+  // 1. Cover Photo (Compulsory / Mandatory)
   const [coverPhoto, setCoverPhoto] = useState('');
   const [coverPhotoInputUrl, setCoverPhotoInputUrl] = useState('');
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -699,7 +699,7 @@ export default function BrandPostsScreen() {
     }
 
     if (!coverPhoto.trim()) {
-      toast.show('Main Cover Photo lazmi (compulsory) hai! Baraye meharbani cover photo upload ya enter karein.', 'error');
+      toast.show('Main Cover Photo is mandatory! Please upload or enter a cover photo.', 'error');
       return;
     }
 
@@ -819,7 +819,7 @@ export default function BrandPostsScreen() {
             deal_id: dealId,
             category: 'deal',
             title: 'Deal Published! 🚀',
-            body: `Aapki deal "${payload.title}" successfully live publish ho chuki hai.`,
+            body: `Your deal "${payload.title}" has been successfully published live.`,
             action_url: '/(brand)/posts',
           });
 
@@ -830,7 +830,7 @@ export default function BrandPostsScreen() {
             deal_id: dealId,
             category: 'moderation',
             title: 'New Deal Moderation Queue',
-            body: `${brand?.name || 'Brand'} ne new promotion "${payload.title}" publish ki hai review ke liye.`,
+            body: `${brand?.name || 'Brand'} published a new promotion "${payload.title}" for review.`,
             action_url: 'deals_queue',
           });
 
@@ -844,7 +844,7 @@ export default function BrandPostsScreen() {
               deal_id: dealId,
               category: 'deal',
               title: `${brand?.name || 'Followed Brand'}: New Deal Live! 🔥`,
-              body: `${brand?.name || 'Brand'} ne new deal "${payload.title}" (${payload.discount_pct}% OFF) live kar di hai!`,
+              body: `${brand?.name || 'Brand'} published a new deal "${payload.title}" (${payload.discount_pct}% OFF)!`,
               action_url: `/(consumer)/deal/${dealId}`,
             });
           }
@@ -1631,7 +1631,7 @@ export default function BrandPostsScreen() {
           </View>
 
           <ScrollView contentContainerStyle={styles.createModalForm} showsVerticalScrollIndicator={false}>
-            {/* ─── SECTION 1: MAIN COVER PHOTO (COMPULSORY / LAZMI) ─── */}
+            {/* ─── SECTION 1: MAIN COVER PHOTO (COMPULSORY / MANDATORY) ─── */}
             <View style={styles.sectionCardBox}>
               <View style={styles.photosHeaderRow}>
                 <View style={styles.labelRow}>
@@ -1646,12 +1646,12 @@ export default function BrandPostsScreen() {
                     color={coverPhoto ? '#00FF66' : '#FF4D4D'}
                   />
                   <Text style={[styles.compulsoryBadgeText, !coverPhoto && { color: '#FF4D4D' }]}>
-                    {coverPhoto ? 'Cover Set' : 'Required / Lazmi'}
+                    {coverPhoto ? 'Cover Set' : 'Required'}
                   </Text>
                 </View>
               </View>
               <Text style={styles.helpText}>
-                Yeh main banner photo hai jo Home Feed, Explore aur cards par laazmi show hogi.
+                This is the primary cover photo that will be displayed on Home Feed, Explore, and promotion cards.
               </Text>
 
               {coverPhoto ? (
@@ -1740,7 +1740,7 @@ export default function BrandPostsScreen() {
                 </View>
               </View>
               <Text style={styles.helpText}>
-                Amazon-style swipe gallery ke liye mazeed 5 mukhtalif angles ya pics add karein (Side, Back, Model, Detail view).
+                Add up to 5 additional angles or photos for an Amazon-style swipe gallery (Side, Back, Model, Detail view).
               </Text>
 
               {/* Extra Photos Thumbnails Row */}
@@ -2116,8 +2116,8 @@ export default function BrandPostsScreen() {
             </View>
             <Text style={styles.helpText}>
               {dealType === 'online'
-                ? 'User portal me "Online Only" filter karne walay shoppers ko show hogi.'
-                : 'User portal me "In-Store Outlets" filter karne walay shoppers ko show hogi.'}
+                ? 'Visible to shoppers filtering by "Online Only" in the user portal.'
+                : 'Visible to shoppers filtering by "In-Store Outlets" in the user portal.'}
             </Text>
 
             {/* 9. City Location (Matches User Filter) */}
@@ -2153,7 +2153,7 @@ export default function BrandPostsScreen() {
               })}
             </View>
             <Text style={styles.helpText}>
-              Shopper jab apne shahar ka filter select kare ga to ossay yeh post priority se dikhe gi ("All Pakistan" deals sab ko show hoti hain).
+              Shoppers filtering by their city will see this promotion with priority ("All Pakistan" deals are shown to everyone).
             </Text>
 
             {/* 9. Item Buy Page Link (Website URL) */}
@@ -2162,7 +2162,7 @@ export default function BrandPostsScreen() {
               <Text style={styles.formSectionLabel}>Item Buy Page Link (Website URL)</Text>
             </View>
             <Text style={styles.helpText}>
-              Brand website par is item ke buy page ka direct link dalein taake user asani se website par ja kar buy kar sakay:
+              Enter the direct product page link on your official brand website so users can buy seamlessly:
             </Text>
             <View style={[styles.urlInputRow, { marginTop: 6, marginBottom: 4 }]}>
               <Ionicons name="link-outline" size={16} color="#00FF66" />

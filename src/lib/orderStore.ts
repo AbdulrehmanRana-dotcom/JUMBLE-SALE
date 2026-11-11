@@ -92,7 +92,7 @@ export async function recordAttributedPurchase(
       userId: newOrder.user_id,
       category: 'order',
       title: `Purchase Verified: ${formattedAmount} ✅`,
-      body: `Aapka order claim at ${newOrder.brand_name} verify ho gaya hai aur aapke shopping profile record me add kar diya gaya hai.`,
+      body: `Your purchase at ${newOrder.brand_name} has been verified and added to your shopping history profile.`,
       brand_id: newOrder.brand_id,
       deal_id: newOrder.deal_id,
       action_url: '/(consumer)/profile',
@@ -108,7 +108,7 @@ export async function recordAttributedPurchase(
         deal_id: newOrder.deal_id,
         category: 'order',
         title: `New Verified Purchase! 🛒`,
-        body: `${formattedAmount} purchase claim record hui hai aapke brand (${newOrder.brand_name}) ke liye.`,
+        body: `A verified purchase claim of ${formattedAmount} was recorded for your brand (${newOrder.brand_name}).`,
         action_url: '/(brand)',
         is_read: false,
       });
@@ -120,7 +120,7 @@ export async function recordAttributedPurchase(
       userId: 'admin',
       category: 'order',
       title: `New Attributed Purchase Claim: ${formattedAmount} 💰`,
-      body: `Shopper ne ${formattedAmount} order claim record kiya at ${newOrder.brand_name}.`,
+      body: `A shopper recorded an order claim of ${formattedAmount} at ${newOrder.brand_name}.`,
       action_url: 'overview',
       is_read: false,
     });

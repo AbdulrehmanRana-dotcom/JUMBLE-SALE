@@ -121,10 +121,10 @@ export function InAppBrandBrowserModal({
               </View>
 
               <Text style={styles.companionTitle}>
-                Brand Website Open Ho Gayi Hai
+                Brand Website Opened
               </Text>
               <Text style={styles.companionDesc}>
-                Aap browser tab me <Text style={{ color: '#00FF66', fontWeight: '700' }}>{brandName}</Text> ki official site par shopping complete karein. Jab aap checkout kar lein, toh neeche button daba kar apna shopping record save karein!
+                Complete your shopping on the official <Text style={{ color: '#00FF66', fontWeight: '700' }}>{brandName}</Text> site in your browser. Once you checkout, tap the button below to record your verified purchase!
               </Text>
 
               {/* Direct Re-open Link Pill */}

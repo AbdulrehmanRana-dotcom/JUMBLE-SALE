@@ -465,7 +465,7 @@ export default function RegisterScreen() {
               <Text style={styles.emailBadgeText}>{verificationSentEmail}</Text>
             </View>
             <Text style={styles.verifyHelp}>
-              Please open your Gmail and click the confirmation link to activate your account. Jab aap confirm karenge, aapka email aur password database mein activate ho jayega aur aapka portal access ho jayega.
+              Please open your Gmail and click the confirmation link to activate your account. Once confirmed, your email and password will be activated in the database, granting you instant portal access.
             </Text>
 
             <Button

@@ -1477,13 +1477,13 @@ CRITICAL RULES & 7 CORE CONDITIONS:
    - Clarify Diners menswear brand vs evening dinner food. Return matched_deal_ids: [].
 
 8. VALUE PITCHING & SAVINGS MATH:
-   - When showing deals, state original price, discounted price, and rupee savings! Speak in natural, respectful Pakistani Roman Urdu (aap, janab, bachat).
+   - When showing deals, state original price, discounted price, and rupee savings! Always communicate in natural, respectful, and clear English.
 
 9. BUDGET & AVAILABILITY HONESTY RULE:
-   - When the user asks what products or deals are available under a budget (e.g. "Rs 1000 se neechay kiya mil raha ha?", "Rs 1000 se neechay konsi product mil rahi ha?"):
+   - When the user asks what products or deals are available under a budget (e.g. "under Rs 1000", "deals under 1000"):
      Check the catalog prices!
      If no deals exist under that budget (e.g. lowest live deal is Saeed Ghani at Rs. 1,250):
-     Explicitly and honestly inform the customer: "Janab! Filhal hamare platform par Rs. 1,000 se neechay koi product ya verified deal available nahi hai."
+     Explicitly and honestly inform the customer in English: "Currently, there are no live products or verified deals under Rs. [budget] on our platform."
      Then recommend the closest lowest-priced deals on the platform (Saeed Ghani at Rs. 1,250 with 50% OFF, Cheezious pizza deal at Rs. 1,450) and mention the rupee difference.
      Return matched_deal_ids: [] unless they commanded to show posts.
 
@@ -1769,20 +1769,20 @@ export function runDeterministicBhaiReply(
   ) {
     const statusNote =
       activeCount > 0
-        ? `Is waqt aapke store par **${activeCount} verified deals live** hain${pendingCount > 0 ? `, aur ${pendingCount} deal verification pipeline mein hai` : ''}.`
-        : `Aapke brand par filhal nayi deals launch karne ka behtareen mauqa hai!`;
+        ? `You currently have **${activeCount} verified deals live**${pendingCount > 0 ? `, and ${pendingCount} in the review pipeline` : ''}.`
+        : `It's a great time to launch new promotions for your brand!`;
 
     return {
-      reply: `Walaikum Assalam Janab! Main bilkul khairiat se hoon. Jumble Sale par aapke brand **${brandName}** ki business growth aur portal operations ke liye hazir hoon!\n\n${statusNote}\n\nBataiye Janab, aaj kis deal ka viral title, description, smart pricing ya verification inquiry mein aapki madad karoon?`,
+      reply: `Hello! I am here to help you grow your business and manage portal operations for **${brandName}** on Jumble Sale!\n\n${statusNote}\n\nHow can I help you today with viral titles, descriptions, pricing, or verification guidance?`,
       hasPostAction: false,
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
       ],
       suggested_prompts: [
-        '📊 Meri kitni deals live hain?',
-        '💡 Summer Collection ka Catchy Title do',
-        '💰 Rs. 5,000 par 30% discount calculate karo',
+        '📊 How many deals are live?',
+        '💡 Suggest catchy title for Summer Collection',
+        '💰 Calculate 30% discount on Rs. 5,000',
       ],
     };
   }
@@ -1794,17 +1794,17 @@ export function runDeterministicBhaiReply(
     )
   ) {
     return {
-      reply: `Janab! Mera naam **Bhai** hai — main **Jumble Sale** ka official AI Executive Brand Assistant aur Growth Copilot hoon.\n\nMain aapke brand **${brandName}** ke liye in ahem umoor mein assistance provide karta hoon:\n\n1. 📊 **Real-Time Store Status**: Aapke live, pending review aur rejected deals ki instant details.\n2. 🏷️ **Viral Titles & Catchy Slogans**: High-converting headings jo customers ke clicks barhati hain.\n3. 📝 **Compelling Descriptions**: Fabric quality, warranty aur nationwide delivery highlight karne wali sales copy.\n4. 💰 **Smart Pricing & Margins**: Discount calculation, customer savings aur psychological charm price (.999 jaise Rs. 2,999).\n5. 📜 **Policies & Terms**: 7-day exchange rules aur verification guidelines.\n6. 📢 **Social & WhatsApp Copy**: Ready-to-send broadcast messages aur Instagram captions.\n\nBataiye Janab, aaj aapke store ke liye kya tayyar karein?`,
+      reply: `Hello! My name is **Bhai** — the official AI Executive Brand Assistant and Growth Copilot for **Jumble Sale**.\n\nI provide dedicated assistance for your brand **${brandName}** in these key areas:\n\n1. 📊 **Real-Time Store Status**: Instant visibility into your live, pending, and rejected deals.\n2. 🏷️ **Viral Titles & Catchy Slogans**: High-converting headings that drive customer clicks.\n3. 📝 **Compelling Descriptions**: Persuasive sales copy highlighting fabric quality, warranty, and nationwide delivery.\n4. 💰 **Smart Pricing & Margins**: Discount calculations, customer savings, and psychological charm pricing (.999 like Rs. 2,999).\n5. 📜 **Policies & Terms**: 7-day exchange rules and platform verification guidelines.\n6. 📢 **Social & WhatsApp Copy**: Ready-to-send broadcast messages and Instagram captions.\n\nWhat can I prepare for your store today?`,
       hasPostAction: false,
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
-        { label: '👤 Profile Kholein', route: '/(brand)/profile' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
+        { label: '👤 Open Profile', route: '/(brand)/profile' },
       ],
       suggested_prompts: [
-        '📊 Mere store ka status batao',
-        '💡 Deal ka title aur description likho',
-        '⏳ Pending deal kab approve hogi?',
+        '📊 Check store status',
+        '💡 Suggest title & description',
+        '⏳ When will my pending deal be approved?',
       ],
     };
   }
@@ -1817,22 +1817,22 @@ export function runDeterministicBhaiReply(
   ) {
     const pendingList =
       pendingCount > 0
-        ? `Aapki yeh **${pendingCount} deal(s)** filhal review queue mein hain:\n` +
+        ? `You have **${pendingCount} deal(s)** currently in the review queue:\n` +
           context.pendingDeals.map((d, i) => `${i + 1}. "${d.title}" (${d.discount_pct}% OFF)`).join('\n') +
-          `\n\nYeh jald verify ho kar customer feed par live ho jayengi!`
-        : 'Is waqt aapki koi deal review queue mein pending nahi hai.';
+          `\n\nThese will go live on the customer feed once approved!`
+        : 'You do not have any promotions pending review at this moment.';
 
     return {
-      reply: `Janab! Jumble Sale par nayi deals ki verification hamari quality assurance team karti hai taake platform par sirf 100% authentic aur verified discounts shamil hon.\n\n⏱️ **Verification Timing:**\nAam tor par deals **2 se 12 working hours** ke andar review ho kar live ho jati hain.\n\n✅ **Verification Ke 3 Ahem Assool:**\n1. 📸 **Image Quality:** Saaf aur high-resolution product photos (baghair kisi watermark ke).\n2. 🏷️ **Authentic Pricing:** Discount percentage aur original price ka durust hisaab.\n3. 📜 **Clear Terms:** Valid start/end dates aur exchange policies.\n\n${pendingList}\n\nKya aap pending deals check karna chahte hain?`,
+      reply: `On Jumble Sale, every submitted deal is verified by our Quality Assurance team to ensure 100% authentic discounts.\n\n⏱️ **Verification Timeline:**\nDeals are typically reviewed and published live within **2 to 12 business hours**.\n\n✅ **Key Verification Standards:**\n1. 📸 **Image Quality:** Clean, high-resolution product photos without watermarks.\n2. 🏷️ **Authentic Pricing:** Accurate discount percentage and original price math.\n3. 📜 **Clear Terms:** Valid dates and explicit exchange policies.\n\n${pendingList}\n\nWould you like to review your pending deals?`,
       hasPostAction: false,
       actions: [
-        { label: '⏳ Pending Deals Dekhein', route: '/(brand)/pending' },
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+        { label: '⏳ View Pending Deals', route: '/(brand)/pending' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
       ],
       suggested_prompts: [
-        '⏳ Pending deals kholen',
-        '👉 Nayi deal create karein',
-        '📊 Active posts check karein',
+        '⏳ Open pending deals',
+        '👉 Create new deal',
+        '📊 View active posts',
       ],
     };
   }
@@ -1853,31 +1853,31 @@ export function runDeterministicBhaiReply(
         .join('\n');
 
       return {
-        reply: `Janab! Is waqt aapke brand **${brandName}** ka live database status yeh hai:\n\n• 🟢 **Active Live Deals:** ${activeCount}\n• ⏳ **Pending Verification:** ${pendingCount}\n• ⚠️ **Rejected Deals:** ${rejectedCount}\n• ⏰ **Expired Deals:** ${expiredCount}\n\n**Aapki Active Live Deals:**\n${activeDealsList}\n\nKya aap kisi deal ko edit karna chahte hain ya nayi promotion launch karni hai?`,
+        reply: `Here is the real-time store snapshot for your brand **${brandName}**:\n\n• 🟢 **Active Live Deals:** ${activeCount}\n• ⏳ **Pending Verification:** ${pendingCount}\n• ⚠️ **Rejected Deals:** ${rejectedCount}\n• ⏰ **Expired Deals:** ${expiredCount}\n\n**Your Active Live Deals:**\n${activeDealsList}\n\nWould you like to edit an existing promotion or launch a new one?`,
         hasPostAction: true,
         actions: [
-          { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
-          { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+          { label: '📊 View Active Posts', route: '/(brand)/posts' },
+          { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
           ...(pendingCount > 0 ? [{ label: '⏳ Pending Deals', route: '/(brand)/pending' }] : []),
         ],
         suggested_prompts: [
-          '👉 Nayi deal create karein',
-          '💰 Discount price calculate karein',
-          '📢 WhatsApp broadcast copy tayyar karein',
+          '👉 Create new deal',
+          '💰 Calculate discount price',
+          '📢 Draft broadcast copy',
         ],
       };
     } else {
       return {
-        reply: `Janab! Filhal aapke brand **${brandName}** par koi verified deal live nahi hai${pendingCount > 0 ? ` (magar **${pendingCount} deal** verification pipeline mein hai)` : ''}.\n\nJumble Sale ke hazaron shoppers tak pohnchne ke liye aayein abhi ek zabardast discount deal launch karein!`,
+        reply: `Currently, there are no live verified deals for **${brandName}**${pendingCount > 0 ? ` (with **${pendingCount} deal(s)** in the verification pipeline)` : ''}.\n\nLaunch a high-impact promotion today to reach thousands of active shoppers on Jumble Sale!`,
         hasPostAction: true,
         actions: [
-          { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+          { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
           ...(pendingCount > 0 ? [{ label: '⏳ Pending Deals', route: '/(brand)/pending' }] : []),
         ],
         suggested_prompts: [
-          '👉 Nayi deal banayein',
-          '💡 Catchy Title Banayein',
-          '⏳ Pending deal kab live hogi?',
+          '👉 Create new deal',
+          '💡 Suggest Catchy Title',
+          '⏳ When will pending deal go live?',
         ],
       };
     }
@@ -1887,28 +1887,28 @@ export function runDeterministicBhaiReply(
   if (/\b(?:reject|rejected|rejection|namanzoor|reject kyu|reject kyun)\b/i.test(p)) {
     if (rejectedCount > 0) {
       const rejectedList = context.rejectedDeals
-        .map((d, i) => `${i + 1}. "${d.title}": *${d.rejection_reason || 'Image ya pricing update darj karein'}*`)
+        .map((d, i) => `${i + 1}. "${d.title}": *${d.rejection_reason || 'Photo or pricing update required'}*`)
         .join('\n');
 
       return {
-        reply: `Janab! Review team ne aapki deal par yeh wazahati note darj kiya hai:\n\n${rejectedList}\n\n**Deal Ko Re-submit Karne Ka Aasan Tareeqa:**\n1. Neechay diye gaye button se 'Rejected Deals' section kholen\n2. Mutalliqa deal par 'Edit' tap karein\n3. Review team ke note ke mutabiq tasveer ya discount theek karein\n4. 'Save & Resubmit' dabayen — hamari team foran re-verify kar degi!`,
+        reply: `Here are the review notes provided by the moderation team for your rejected promotions:\n\n${rejectedList}\n\n**How to Resubmit:**\n1. Open the Rejected Deals section below\n2. Tap 'Edit' on the promotion\n3. Adjust the photo or pricing per the review note\n4. Tap 'Save & Resubmit' — our team will re-verify promptly!`,
         hasPostAction: true,
         actions: [
-          { label: '⚠️ Rejected Deals Kholein', route: '/(brand)/rejected' },
-          { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+          { label: '⚠️ View Rejected Deals', route: '/(brand)/rejected' },
+          { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
         ],
         suggested_prompts: [
-          '⚠️ Rejected deals check karein',
-          '👉 Nayi deal create karein',
+          '⚠️ Check rejected deals',
+          '👉 Create new deal',
         ],
       };
     } else {
       return {
-        reply: `Janab! Mashallah is waqt aapke brand ki koi deal rejected nahi hai. Tamam policies standard hain: saaf images, durust discount rate aur valid dates honi chahiyein.`,
+        reply: `Great news! None of your brand promotions are currently rejected. Keep up the high standard: crisp photos, accurate discounts, and clear terms.`,
         hasPostAction: false,
         actions: [
-          { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
-          { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+          { label: '📊 View Active Posts', route: '/(brand)/posts' },
+          { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
         ],
       };
     }
@@ -1937,22 +1937,22 @@ export function runDeterministicBhaiReply(
 
     const discountAdvice =
       discountPct <= 20
-        ? 'Yeh discount profit margins ko mehfooz rakhta hai aur high-end luxury items ke liye best hai.'
+        ? 'This discount protects profit margins and works best for luxury and premium collections.'
         : discountPct <= 40
-        ? 'Yeh Pakistani retail e-commerce ka "sweet spot" hai jisme sab se zyada sales convert hoti hain!'
-        : 'Clearance aur bulk inventory move karne ke liye zabardast dhamaka deal hai!';
+        ? 'This is the "sweet spot" for retail e-commerce, yielding the highest sales conversion rates!'
+        : 'An aggressive promotional deal ideal for clearance and fast bulk inventory turnover!';
 
     return {
-      reply: `💰 **Smart Commercial Pricing Analysis by Bhai (${brandName})**\n\n• **Asal Qimat (Original Price):** Rs. ${origPrice.toLocaleString()}\n• **Discount Rate:** ${discountPct}% OFF\n• **Customer Savings:** Rs. ${savings.toLocaleString()} ki seedhi bachat!\n• **Final Selling Price:** Rs. ${sellingPrice.toLocaleString()}\n\n✨ **Bhai Ka Charm Price Mashwara:**\n👉 **Rs. ${charmPrice.toLocaleString()}**\n*(Pakistani retail e-commerce mein .999 charm price impulse buying aur order volume ko 14% tak barha deti hai!)*\n\n💡 **Margin Advice:**\n${discountAdvice}\n\nKya main is pricing ke sath aapke liye deal draft karoon?`,
+      reply: `💰 **Smart Commercial Pricing Analysis by Bhai (${brandName})**\n\n• **Original Price:** Rs. ${origPrice.toLocaleString()}\n• **Discount Rate:** ${discountPct}% OFF\n• **Customer Savings:** Rs. ${savings.toLocaleString()}\n• **Final Selling Price:** Rs. ${sellingPrice.toLocaleString()}\n\n✨ **Charm Price Recommendation:**\n👉 **Rs. ${charmPrice.toLocaleString()}**\n*(In retail e-commerce, .999 charm pricing boosts impulse buying and order volume by up to 14%!)*\n\n💡 **Margin Advice:**\n${discountAdvice}\n\nWould you like me to draft a promotion with this pricing?`,
       hasPostAction: true,
       actions: [
-        { label: '👉 Is Deal Ko Create Karein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+        { label: '👉 Create Deal at this Price', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
       ],
       suggested_prompts: [
-        '👉 Deal create karein',
-        '💡 Iske liye catchy title likho',
-        '📝 Product description banao',
+        '👉 Create deal',
+        '💡 Suggest catchy title',
+        '📝 Draft product description',
       ],
     };
   }
@@ -1960,16 +1960,16 @@ export function runDeterministicBhaiReply(
   // 7. Viral Titles & Catchy Slogans
   if (/\b(?:title|slogan|heading|naam do|catchy)\b/i.test(p)) {
     return {
-      reply: `🏷️ **Bhai ke Top 3 Recommended Titles (${brandName}):**\n\n1. ⚡ **Flash Sale / Urgency:**\n"Aakhri Mauqa: ${brandName} ki Exclusive Sale par Flat 35% Off!"\n\n2. 🔥 **Viral / Click-Magnet:**\n"Bachat Mela: Premium Collection ab Sirf Rs. 2,999 mein — Limited Stock!"\n\n3. ✨ **Luxury / Signature:**\n"${brandName} Signature Style: Unmatched Quality with Special Promotional Savings"\n\nAap in mein se koi bhi title direct apni Jumble Sale post mein laga sakte hain!`,
+      reply: `🏷️ **Top 3 Recommended Titles for ${brandName}:**\n\n1. ⚡ **Flash Sale / Urgency:**\n"Last Chance: Exclusive Sale on ${brandName} — Flat 35% Off!"\n\n2. 🔥 **Viral / Click-Magnet:**\n"Mega Savings: Premium Collection Now Starting at Rs. 2,999 — Limited Stock!"\n\n3. ✨ **Luxury / Signature:**\n"${brandName} Signature Style: Unmatched Quality with Exclusive Savings"\n\nYou can use any of these titles directly in your Jumble Sale promotion!`,
       hasPostAction: true,
       actions: [
-        { label: '👉 Is Title Se Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📝 Description Likho', route: '/(brand)/create-deal' },
+        { label: '👉 Create Deal with this Title', route: '/(brand)/create-deal' },
+        { label: '📝 Draft Description', route: '/(brand)/create-deal' },
       ],
       suggested_prompts: [
-        '📝 Is deal ki description likho',
-        '📢 WhatsApp broadcast copy banao',
-        '💰 Rs. 4,000 par discount calculate karo',
+        '📝 Write description for this deal',
+        '📢 Draft WhatsApp broadcast copy',
+        '💰 Calculate discount on Rs. 4,000',
       ],
     };
   }
@@ -1977,11 +1977,11 @@ export function runDeterministicBhaiReply(
   // 8. Compelling Product Descriptions
   if (/\b(?:desc|description|tafseel|detail|likho|write)\b/i.test(p)) {
     return {
-      reply: `📝 **High-Converting Product Description by Bhai (${brandName}):**\n\n"${brandName} pesh karta hai aapke liye behtareen quality aur munfarid design. Yeh collection un khareedaron ke liye tayyar ki gayi hai jo premium standard, aala mayaar aur zabardast value pasand karte hain.\n\nAb haasil karein flat discount ki behtareen bachat mehdood waqt ke liye! Pure Pakistan mein fast delivery, cash on delivery aur asaan exchange ki suhoolat ke sath dastyaab hai. Aaj hi shopping karein aur is shandaar offer ka faida uthayein!"`,
+      reply: `📝 **High-Converting Product Description by Bhai (${brandName}):**\n\n"${brandName} presents premium quality craftsmanship with distinct design aesthetics. This collection is curated for discerning shoppers who appreciate superior standards and exceptional value.\n\nEnjoy exclusive flat discounts for a limited time! Available with fast nationwide cash on delivery and hassle-free exchanges. Shop now to take advantage of this exclusive offer!"`,
       hasPostAction: true,
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📢 WhatsApp Copy Tayyar Karein', route: '/(brand)/create-deal' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📢 Draft WhatsApp Copy', route: '/(brand)/create-deal' },
       ],
     };
   }
@@ -1989,10 +1989,10 @@ export function runDeterministicBhaiReply(
   // 9. WhatsApp Broadcast & Social Media Marketing
   if (/\b(?:whatsapp|broadcast|sms|instagram|caption|social|promote|ad)\b/i.test(p)) {
     return {
-      reply: `📱 **Ready-to-Copy WhatsApp Broadcast Blast by Bhai:**\n\nAssalam-o-Alaikum! 🌟\n*Special Flash Sale Alert from ${brandName}!* 🔥\n\nHum le kar aaye hain aap ke liye mahinay ki sab se barri bachat offer!\n🛍️ **Flat 35% OFF** on entire new collection!\n⏰ *Limited Time Only* — Stock tezi se khatam ho raha hai.\n\nOrder karne ke liye abhi link par click karein:\n👉 [Jumble Sale Deal Link]\n\nFree Home Delivery available across Pakistan! 🇵🇰\n\n---\n\n📸 **Instagram & TikTok Viral Caption:**\n"Style that speaks, prices that please! ✨\nElevate your everyday look with ${brandName}'s signature range, now at an unbelievable discount exclusively on @JumbleSale.pk.\n\n👉 Tap the link in bio to claim your voucher before stocks run out!\n🚚 Nationwide Cash on Delivery available.\n\n#JumbleSale #PakistanFashion #${brandName.replace(/\s+/g, '')} #SaleAlert #DiscountPakistan"`,
+      reply: `📱 **Ready-to-Copy WhatsApp Broadcast Blast by Bhai:**\n\nHello! 🌟\n*Special Flash Sale Alert from ${brandName}!* 🔥\n\nWe are excited to bring you our biggest savings offer of the season!\n🛍️ **Flat 35% OFF** on the entire new collection!\n⏰ *Limited Time Only* — Stocks are moving fast.\n\nTap the link below to order:\n👉 [Jumble Sale Deal Link]\n\nFree Home Delivery available across Pakistan! 🇵🇰\n\n---\n\n📸 **Instagram & TikTok Caption:**\n"Style that speaks, prices that please! ✨\nElevate your everyday look with ${brandName}'s signature range, now at an unbelievable discount exclusively on @JumbleSale.pk.\n\n👉 Tap the link in bio to claim your deal before stocks run out!\n🚚 Nationwide Cash on Delivery available.\n\n#JumbleSale #PakistanFashion #${brandName.replace(/\s+/g, '')} #SaleAlert #DiscountPakistan"`,
       hasPostAction: true,
       actions: [
-        { label: '👉 Deal Banayein', route: '/(brand)/create-deal' },
+        { label: '👉 Create Deal', route: '/(brand)/create-deal' },
       ],
     };
   }
@@ -2004,12 +2004,12 @@ export function runDeterministicBhaiReply(
     )
   ) {
     return {
-      reply: `Janab! Apne brand portal ki settings ya profile update karne ka aasan tareeqa yeh hai:\n\n1. **Profile & Info:** Bottom navigation mein 'Profile' icon par tap karein, jahan se aap apna logo, banner, business email aur contact number update kar sakte hain.\n2. **Active Deals Edit/Delete:** Bottom navigation mein 'Posts' tab kholen, mutalliqa post ke 'Edit' icon par tap kar ke pricing ya validity tabdeel karein.\n3. **Pending Approvals:** 'Pending' section se check karein ke review status kya chal raha hai.\n\nBataiye Janab, kis section mein navigate karna chahte hain?`,
+      reply: `Here is how you can manage your brand settings and profile:\n\n1. **Profile & Info:** Tap the 'Profile' tab in the bottom navigation to update your logo, banner, business email, and contact number.\n2. **Edit/Delete Active Deals:** Open the 'Posts' tab, tap the edit icon on any promotion to modify pricing or validity.\n3. **Pending Approvals:** View the 'Pending' section to monitor review progress.\n\nWhich section would you like to navigate to?`,
       hasPostAction: false,
       actions: [
-        { label: '👤 Profile Kholein', route: '/(brand)/profile' },
-        { label: '📊 Posts Dekhein', route: '/(brand)/posts' },
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
+        { label: '👤 Open Profile', route: '/(brand)/profile' },
+        { label: '📊 View Posts', route: '/(brand)/posts' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
       ],
     };
   }
@@ -2021,14 +2021,14 @@ export function runDeterministicBhaiReply(
         ? context.competitorBenchmark
             .map((b, i) => `${i + 1}. **${b.brandName}**: "${b.title}" (${b.discountPct}% OFF)`)
             .join('\n')
-        : '• Market mein standard discounts 30% se 50% chal rahe hain.';
+        : '• Market discounts typically range between 30% and 50%.';
 
     return {
-      reply: `Janab! Jumble Sale platform par verified brands ke live market trends yeh hain:\n\n${benchText}\n\n💡 **Bhai Ka Strategic Mashwara:**\nCustomers ko attract karne ke liye 30% se 40% discount sab se zyada effective volume lata hai. Agar aap clearance kar rahe hain to 50% flat discount customer clicks ko 3 guna barha deta hai!`,
+      reply: `Here are the live market benchmarks for verified brands on Jumble Sale:\n\n${benchText}\n\n💡 **Strategic Recommendation:**\nA 30% to 40% discount is the most effective range for sustained sales volume. For seasonal clearance, a 50% flat discount triples shopper clicks!`,
       hasPostAction: true,
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
       ],
     };
   }
@@ -2041,22 +2041,22 @@ export function runDeterministicBhaiReply(
   ];
   if (offTopicKeywords.some((word) => p.includes(word))) {
     return {
-      reply: `Janab, main sirf **Jumble Sale** aur aapke brand **${brandName}** ki business growth aur portal operations ke liye hazir hoon! 💼\n\nAayein kisi deal ka catchy title, description, discount pricing ya active inventory check karein.`,
+      reply: `I am here exclusively to help grow your brand **${brandName}** on Jumble Sale! 💼\n\nLet's check your active inventory, calculate discount pricing, or craft a viral title for your next promotion.`,
       hasPostAction: false,
       actions: [
-        { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-        { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+        { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+        { label: '📊 View Active Posts', route: '/(brand)/posts' },
       ],
     };
   }
 
   // General Brand Strategy fallback
   return {
-    reply: `💼 **Bhai's Strategic Assistance for ${brandName}:**\n\nJumble Sale par aapke brand ke liye yeh 3 cheezein sab se zyada orders generate karti hain:\n1. 🏷️ **Clear Discount Title**: Flat 30% ya 40% discount ko heading mein darj karein.\n2. 📸 **Clear Photos**: Asli aur high-resolution product pictures upload karein.\n3. ⏰ **Urgency Factor**: "Limited 48 Hours Flash Sale" likhne se customer foran purchase karta hai.\n\nBataiye Janab, kya main aapke liye is campaign ka title, description ya pricing tayyar karoon?`,
+    reply: `💼 **Bhai's Strategic Assistance for ${brandName}:**\n\nOn Jumble Sale, these 3 elements drive the highest order volume:\n1. 🏷️ **Clear Discount Title**: Highlight flat 30% or 40% discounts directly in the title.\n2. 📸 **High-Resolution Photos**: Showcase authentic product photography from multiple angles.\n3. ⏰ **Urgency Factor**: Including "Limited 48 Hours Flash Sale" encourages immediate checkout.\n\nWould you like me to prepare a title, description, or pricing calculation for your next campaign?`,
     hasPostAction: true,
     actions: [
-      { label: '👉 Nayi Deal Banayein', route: '/(brand)/create-deal' },
-      { label: '📊 Active Posts Dekhein', route: '/(brand)/posts' },
+      { label: '👉 Create New Deal', route: '/(brand)/create-deal' },
+      { label: '📊 View Active Posts', route: '/(brand)/posts' },
     ],
   };
 }
@@ -2108,7 +2108,7 @@ export async function askBhaiBrandCopilot(
       const systemPrompt = `You are "Bhai", the official AI Executive Brand Assistant & Business Growth Copilot for Jumble Sale Pakistan.
 
 STRICT BEHAVIORAL & PERSONA RULES:
-1. RESPECTFUL TONE: You are speaking to the respected brand manager/owner of "${brandName}" (Category: "${context.category}"). Always address them with deep respect ("Janab", "Aap", "Sir") in natural, polished Pakistani Roman Urdu (or English if addressed in English).
+1. RESPECTFUL TONE: You are speaking to the respected brand manager/owner of "${brandName}" (Category: "${context.category}"). Always address them with professional respect in clear, polished English.
 2. MISSION: Provide elite business assistance — store status, deal titles, descriptions, smart pricing math (.999 charm prices), terms drafting, WhatsApp broadcast copy, and portal troubleshooting.
 3. LIVE DATABASE CONTEXT:
 • Brand Name: ${brandName}
@@ -2119,10 +2119,10 @@ STRICT BEHAVIORAL & PERSONA RULES:
 
 4. OUTPUT FORMAT: Return JSON:
 {
-  "reply": "Your respectful, structured answer in Roman Urdu...",
+  "reply": "Your respectful, structured answer in English...",
   "hasPostAction": true,
   "actions": [
-    { "label": "👉 Nayi Deal Banayein", "route": "/(brand)/create-deal" }
+    { "label": "👉 Create New Deal", "route": "/(brand)/create-deal" }
   ]
 }`;
 

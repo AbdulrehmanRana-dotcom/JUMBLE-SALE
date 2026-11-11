@@ -100,7 +100,7 @@ export default function CreateOrEditDealScreen() {
 
   const [loading, setLoading] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  // 1. Cover Photo (Compulsory / Lazmi)
+  // 1. Cover Photo (Compulsory / Mandatory)
   const [coverPhoto, setCoverPhoto] = useState('');
   const [coverPhotoInputUrl, setCoverPhotoInputUrl] = useState('');
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -537,7 +537,7 @@ export default function CreateOrEditDealScreen() {
     }
 
     if (!coverPhoto.trim()) {
-      toast.show('Main Cover Photo lazmi (compulsory) hai! Please upload or enter a cover photo.', 'error');
+      toast.show('Main Cover Photo is mandatory! Please upload or enter a cover photo.', 'error');
       return;
     }
 
@@ -623,7 +623,7 @@ export default function CreateOrEditDealScreen() {
             deal_id: createdId,
             category: 'deal',
             title: 'Deal Submitted for Review ⏳',
-            body: `Aapki deal "${dealPayload.title}" submit ho chuki hai. Admin approval ke baad live ho jaye gi.`,
+            body: `Your deal "${dealPayload.title}" has been submitted. It will go live after Admin approval.`,
             action_url: '/(brand)/posts',
           });
 
@@ -634,7 +634,7 @@ export default function CreateOrEditDealScreen() {
             deal_id: createdId,
             category: 'moderation',
             title: 'New Deal Moderation Queue',
-            body: `${brand.name} ne "${dealPayload.title}" submit ki hai marketplace review ke liye.`,
+            body: `${brand.name} submitted "${dealPayload.title}" for marketplace review.`,
             action_url: 'deals_queue',
           });
         } catch (notifErr) {
@@ -912,7 +912,7 @@ export default function CreateOrEditDealScreen() {
             </View>
           </View>
 
-          {/* Card 3A: MAIN COVER PHOTO (COMPULSORY / LAZMI) */}
+          {/* Card 3A: MAIN COVER PHOTO (COMPULSORY / MANDATORY) */}
           <View style={styles.card}>
             <View style={styles.imageHeaderRow}>
               <View style={{ flex: 1 }}>
@@ -926,12 +926,12 @@ export default function CreateOrEditDealScreen() {
                       color={coverPhoto ? colors.primary : colors.error}
                     />
                     <Text style={[styles.compulsoryBadgeText, !coverPhoto && { color: colors.error }]}>
-                      {coverPhoto ? 'Cover Set' : 'Required / Lazmi'}
+                      {coverPhoto ? 'Cover Set' : 'Required'}
                     </Text>
                   </View>
                 </View>
                 <Text style={styles.imageSub}>
-                  Yeh photo Home Feed aur Explore cards par main banner ke tor par compulsory show hogi.
+                  This photo is required and will be displayed as the main banner on Home Feed and Explore cards.
                 </Text>
               </View>
             </View>
@@ -1014,7 +1014,7 @@ export default function CreateOrEditDealScreen() {
                   <Text style={styles.optionalBadgeText}>(Optional)</Text>
                 </View>
                 <Text style={styles.imageSub}>
-                  Amazon-style swipe gallery ke liye mazeed 5 mukhtalif angles ya pics add karein (Side, Back, Model, Detail view).
+                  Add up to 5 additional angles or photos for an Amazon-style swipe gallery (Side, Back, Model, Detail view).
                 </Text>
               </View>
               <Badge

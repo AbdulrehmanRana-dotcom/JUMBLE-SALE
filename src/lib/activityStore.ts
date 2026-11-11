@@ -434,7 +434,7 @@ export async function toggleDealLike(
             dealId,
             category: 'deal',
             title: 'New Like on Your Promotion! ❤️',
-            body: `${userName || 'A shopper'} ne aapki promotion "${dealTitle}" ko like kiya hai.`,
+            body: `${userName || 'A shopper'} liked your promotion "${dealTitle}".`,
             action_url: '/(brand)/posts',
             aggregation_key: `like_deal_${dealId}`,
             actor_name: userName || 'A shopper',

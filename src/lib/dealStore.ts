@@ -301,7 +301,7 @@ export const DEFAULT_SEED_DEALS: Deal[] = [
     brand_id: 'b8888888-8888-8888-8888-888888888888',
     brand: IMTIAZ_BRAND,
     brand_name: 'Imtiaz Super Market',
-    title: 'Monthly Mega Bachat - Up to 20% Off Groceries & Cooking Oil',
+    title: 'Monthly Mega Savings - Up to 20% Off Groceries & Cooking Oil',
     description: 'Stock up on monthly kitchen staples, Dalda oil, Basmati rice, and everyday household items.',
     category_id: '44444444-4444-4444-4444-444444444444', // Grocery & Supermarket
     discount_pct: 20,

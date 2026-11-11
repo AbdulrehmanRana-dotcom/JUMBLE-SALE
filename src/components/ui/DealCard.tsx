@@ -178,7 +178,7 @@ export function DealCard({
 
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${displayComments} comments`}
+            accessibilityLabel={`${displayComments} reviews`}
             onPress={(e) => {
               e.stopPropagation();
               if (onCommentPress) {
@@ -189,14 +189,14 @@ export function DealCard({
             }}
             hitSlop={6}>
             <Text style={styles.fbCommentsCountText}>
-              {displayComments.toLocaleString()} {displayComments === 1 ? 'comment' : 'comments'}
+              {displayComments.toLocaleString()} {displayComments === 1 ? 'review' : 'reviews'}
             </Text>
           </Pressable>
         </View>
 
-        {/* Bottom Actions Row: Like, Comment, Share on Left + Save on Right Corner */}
+        {/* Bottom Actions Row: Like, Review, Share on Left + Save on Right Corner */}
         <View style={styles.bottomRow}>
-          {/* Left Actions: Like, Comment, Share */}
+          {/* Left Actions: Like, Review, Share */}
           <View style={styles.leftActions}>
             {/* 1. Like Button (Heart) */}
             <Pressable
@@ -218,10 +218,10 @@ export function DealCard({
               </Text>
             </Pressable>
 
-            {/* 2. Comment Button (Chatbubble) */}
+            {/* 2. Review Button (Chatbubble) */}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Comments"
+              accessibilityLabel="Reviews"
               hitSlop={8}
               onPress={(e) => {
                 e.stopPropagation();

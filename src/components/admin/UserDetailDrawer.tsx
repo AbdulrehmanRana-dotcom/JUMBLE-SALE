@@ -317,7 +317,7 @@ export function UserDetailDrawer({
                   <View style={{ gap: spacing[3] }}>
                     {/* Reviews */}
                     <Text style={styles.subHeading}>
-                      Reviews / Comments Submitted ({data.reviewsGiven.length})
+                      Reviews Submitted ({data.reviewsGiven.length})
                     </Text>
                     {data.reviewsGiven.length === 0 ? (
                       <Text style={styles.emptyNotice}>No reviews posted by this user.</Text>

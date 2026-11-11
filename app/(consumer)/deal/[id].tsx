@@ -239,7 +239,7 @@ export default function DealDetailScreen() {
 
   const handleAddComment = async () => {
     if (!commentText.trim()) {
-      toast.show('Please fill in your comment first', 'error');
+      toast.show('Please fill in your review first', 'error');
       return;
     }
     if (!deal) return;
@@ -272,10 +272,10 @@ export default function DealDetailScreen() {
         deal.brand_id
       );
       setCommentText('');
-      toast.show('Comment posted successfully! 💬', 'success');
+      toast.show('Review posted successfully! 💬', 'success');
       refetchComments();
     } catch (err: any) {
-      toast.show(err.message || 'Failed to submit comment', 'error');
+      toast.show(err.message || 'Failed to submit review', 'error');
     } finally {
       setCommentSubmitting(false);
     }

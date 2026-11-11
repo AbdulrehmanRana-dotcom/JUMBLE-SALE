@@ -161,13 +161,13 @@ export function BrandAnalyticsDashboard({
           <Text style={styles.kpiSub}>Real user hearts</Text>
         </View>
 
-        {/* Metric 4: Total Comments */}
+        {/* Metric 4: Total Reviews */}
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIconBox, { backgroundColor: 'rgba(168, 85, 247, 0.12)' }]}>
             <Ionicons name="chatbubbles" size={18} color="#A855F7" />
           </View>
           <Text style={styles.kpiVal}>{metrics.totalComments.toLocaleString()}</Text>
-          <Text style={styles.kpiLabel}>COMMENTS</Text>
+          <Text style={styles.kpiLabel}>REVIEWS</Text>
           <Text style={styles.kpiSub}>User reviews</Text>
         </View>
 
@@ -217,7 +217,7 @@ export function BrandAnalyticsDashboard({
             <Text style={styles.chartTitle}>Past 7 Days Activity</Text>
           </View>
           <Text style={styles.chartTotalBadge}>
-            {total7DayCount} {selectedMetric === 'all' ? 'Events' : selectedMetric}
+            {total7DayCount} {selectedMetric === 'all' ? 'Events' : selectedMetric === 'comments' ? 'Reviews' : selectedMetric}
           </Text>
         </View>
 
@@ -229,7 +229,7 @@ export function BrandAnalyticsDashboard({
               { id: 'views', label: 'Views' },
               { id: 'clicks', label: 'Clicks' },
               { id: 'likes', label: 'Likes' },
-              { id: 'comments', label: 'Comments' },
+              { id: 'comments', label: 'Reviews' },
             ] as { id: ChartMetric; label: string }[]
           ).map((item) => {
             const isSelected = selectedMetric === item.id;

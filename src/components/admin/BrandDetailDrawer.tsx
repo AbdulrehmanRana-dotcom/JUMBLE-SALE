@@ -364,7 +364,7 @@ export function BrandDetailDrawer({
                                 {act.type === 'like'
                                   ? 'liked'
                                   : act.type === 'comment'
-                                  ? 'commented on'
+                                  ? 'reviewed'
                                   : 'shared'}{' '}
                                 &quot;{act.deal_title}&quot;
                               </Text>

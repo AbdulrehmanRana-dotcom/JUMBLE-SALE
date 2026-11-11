@@ -125,7 +125,7 @@ export default function BrandDealDetailScreen() {
 
   const handleAddComment = async () => {
     if (!commentText.trim()) {
-      toast.show('Please write a reply or comment first', 'error');
+      toast.show('Please write a reply or review first', 'error');
       return;
     }
     if (!deal) return;
@@ -146,7 +146,7 @@ export default function BrandDealDetailScreen() {
       toast.show('Reply added to discussion! 💬', 'success');
       refetchComments();
     } catch (err: any) {
-      toast.show(err.message || 'Failed to submit comment', 'error');
+      toast.show(err.message || 'Failed to submit review', 'error');
     } finally {
       setCommentSubmitting(false);
     }
@@ -297,7 +297,7 @@ export default function BrandDealDetailScreen() {
           <View style={styles.engagementStat}>
             <Ionicons name="chatbubble-ellipses" size={17} color="#00FF66" />
             <Text style={styles.engagementText}>
-              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{comments.length}</Text> {comments.length === 1 ? 'comment' : 'comments'}
+              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{comments.length}</Text> {comments.length === 1 ? 'review' : 'reviews'}
             </Text>
           </View>
         </View>

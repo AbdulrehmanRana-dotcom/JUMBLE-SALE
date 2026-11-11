@@ -126,7 +126,7 @@ export function CommentsSheetModal({
       // Scroll to top
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err: any) {
-      toast.show(err.message || 'Could not post comment', 'error');
+      toast.show(err.message || 'Could not post review', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -164,7 +164,7 @@ export function CommentsSheetModal({
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={styles.headerTitleWrap}>
-              <Text style={styles.headerTitle}>Comments</Text>
+              <Text style={styles.headerTitle}>Reviews</Text>
               <View style={styles.countBadge}>
                 <Text style={styles.countBadgeText}>{comments.length}</Text>
               </View>
@@ -174,7 +174,7 @@ export function CommentsSheetModal({
               style={styles.closeBtn}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Close comments">
+              accessibilityLabel="Close reviews">
               <Ionicons name="close" size={20} color="#94A3B8" />
             </Pressable>
           </View>
@@ -219,7 +219,7 @@ export function CommentsSheetModal({
                   <View style={styles.emptyIconCircle}>
                     <Ionicons name="chatbubble-ellipses-outline" size={32} color="#00FF66" />
                   </View>
-                  <Text style={styles.emptyTitle}>No comments yet</Text>
+                  <Text style={styles.emptyTitle}>No reviews yet</Text>
                   <Text style={styles.emptySubtitle}>
                     Be the first to review this {brandName} deal or ask a question!
                   </Text>
@@ -271,7 +271,7 @@ export function CommentsSheetModal({
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder={`Add a comment for ${brandName}...`}
+                placeholder={`Write a review for ${brandName}...`}
                 placeholderTextColor="#64748B"
                 value={inputText}
                 onChangeText={setInputText}
@@ -290,7 +290,7 @@ export function CommentsSheetModal({
                 ]}
                 hitSlop={6}
                 accessibilityRole="button"
-                accessibilityLabel="Send comment">
+                accessibilityLabel="Send review">
                 {submitting ? (
                   <ActivityIndicator size="small" color="#090A0E" />
                 ) : (

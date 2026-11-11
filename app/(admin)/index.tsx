@@ -1650,7 +1650,7 @@ export default function AdminDashboardScreen() {
                           <Text style={{ fontWeight: 'bold', color: adminTheme.textPrimary }}>
                             {act.user_name}
                           </Text>{' '}
-                          {act.type === 'like' ? 'liked' : act.type === 'comment' ? 'commented on' : 'shared'}{' '}
+                          {act.type === 'like' ? 'liked' : act.type === 'comment' ? 'reviewed' : 'shared'}{' '}
                           &quot;{act.deal_title}&quot;
                         </Text>
                         <Text style={styles.liveActivityTime}>
@@ -2009,7 +2009,10 @@ export default function AdminDashboardScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <Ionicons name="chatbubble-ellipses" size={13} color={adminTheme.neon} />
                     <Text style={{ fontSize: 12, color: adminTheme.textSecondary, fontWeight: '600' }}>
-                      {dynamicCommentsMap[item.id] ?? adminBatchInteractions?.[item.id]?.comments_count ?? item.comments_count ?? 0} comments
+                      {(() => {
+                        const cnt = dynamicCommentsMap[item.id] ?? adminBatchInteractions?.[item.id]?.comments_count ?? item.comments_count ?? 0;
+                        return `${cnt} ${cnt === 1 ? 'review' : 'reviews'}`;
+                      })()}
                     </Text>
                   </View>
                 </View>
@@ -2613,7 +2616,10 @@ export default function AdminDashboardScreen() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                               <Ionicons name="chatbubble-ellipses" size={12} color={adminTheme.neon} />
                               <Text style={{ fontSize: 11, color: adminTheme.textSecondary, fontWeight: '600' }}>
-                                {dynamicCommentsMap[deal.id] ?? adminBatchInteractions?.[deal.id]?.comments_count ?? deal.comments_count ?? 0} comments
+                                {(() => {
+                                  const cnt = dynamicCommentsMap[deal.id] ?? adminBatchInteractions?.[deal.id]?.comments_count ?? deal.comments_count ?? 0;
+                                  return `${cnt} ${cnt === 1 ? 'review' : 'reviews'}`;
+                                })()}
                               </Text>
                             </View>
                           </View>
@@ -2685,7 +2691,7 @@ export default function AdminDashboardScreen() {
           />
           <MetricCard
             icon="chatbubbles"
-            label="Total Comments"
+            label="Total Reviews"
             value={totalComments}
             accentColor={adminTheme.neon}
           />
@@ -2762,7 +2768,7 @@ export default function AdminDashboardScreen() {
                     {act.type === 'like'
                       ? 'liked'
                       : act.type === 'comment'
-                      ? 'commented on'
+                      ? 'reviewed'
                       : 'shared'}{' '}
                     &quot;{act.deal_title}&quot;
                   </Text>

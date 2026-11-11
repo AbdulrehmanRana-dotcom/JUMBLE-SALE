@@ -47,6 +47,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "server": "npm --prefix server start",
+    "server:dev": "npm --prefix server run dev",
     "lint": "expo lint"
   },
   "private": true

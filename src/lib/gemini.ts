@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocalBrandDeals } from '@/lib/dealStore';
 import { getLocalBrands, KHAADI_BRAND } from '@/lib/brandStore';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { callServerShopperAI, callServerBrandAI } from '@/lib/serverApi';
 import type { Deal } from '@/types/database.types';
 
 // ==============================================================================
@@ -1352,6 +1353,23 @@ export async function askJumbleBachatAssistant(
 ): Promise<AssistantResponse> {
   const query = (userQuery || '').trim();
 
+  // Try Node.js Backend API Server first (Graceful Fallback on any failure)
+  try {
+    const serverResult = await callServerShopperAI(
+      query,
+      chatHistory.map((m) => ({ role: m.role, content: m.content }))
+    );
+    if (serverResult) {
+      return {
+        reply: serverResult.reply,
+        deals: serverResult.deals,
+        is_off_topic: serverResult.is_off_topic,
+        language: 'roman_urdu',
+        suggested_chips: serverResult.suggested_chips,
+      };
+    }
+  } catch {}
+
   // 1. Fetch REAL active live deals directly from platform store
   const liveDeals = await getLiveDatabaseDealsForAI();
 
@@ -2051,6 +2069,19 @@ export async function askBhaiBrandCopilot(
   preloadedContext?: BrandLiveContext
 ): Promise<BhaiResponse> {
   const p = (prompt || '').trim();
+
+  // Try Node.js Backend API Server first (Graceful Fallback)
+  try {
+    const serverResult = await callServerBrandAI(brandNameOrId, p);
+    if (serverResult) {
+      return {
+        reply: serverResult.reply,
+        hasPostAction: serverResult.hasPostAction,
+        actions: serverResult.actions,
+        suggested_prompts: serverResult.suggested_prompts,
+      };
+    }
+  } catch {}
 
   // 1. Fetch Real-time Database Context for the Brand
   const context = preloadedContext || (await getBrandLiveContext(brandNameOrId, ownerId));

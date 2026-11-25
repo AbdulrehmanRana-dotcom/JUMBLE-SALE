@@ -7,7 +7,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   Share,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DealCard } from '@/components/ui/DealCard';
 import { CommentsSheetModal } from '@/components/ui/CommentsSheetModal';
@@ -331,7 +331,7 @@ export default function BrandDashboardScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* ─── 1. TOP SEARCH & LOGO HEADER ─── */}
       <View style={styles.topBar}>
         <View style={styles.logoBox}>

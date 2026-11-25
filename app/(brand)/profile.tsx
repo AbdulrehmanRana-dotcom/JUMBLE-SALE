@@ -11,7 +11,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -19,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandAnalyticsDashboard } from '@/components/brand/BrandAnalyticsDashboard';
 import { DealLiveTimer } from '@/components/brand/DealLiveTimer';
@@ -609,7 +609,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 1: CHANGE PASSWORD (User Screenshot 1) ───
   if (activeView === 'change-password') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
             <View style={styles.logoBox}>
@@ -694,7 +694,7 @@ export default function BrandProfileScreen() {
     })();
 
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
             <View style={styles.logoBox}>
@@ -777,7 +777,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 3: MAIN MANAGEMENT MENU ───
   if (activeView === 'menu') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.topHeader}>
           <View>
             <Text style={styles.headerBrandTitle}>{brandName}</Text>
@@ -909,7 +909,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 4: PERFORMANCE INSIGHTS DASHBOARD ───
   if (activeView === 'dashboard') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.subHeader}>
           <Pressable onPress={() => setActiveView('menu')} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -955,7 +955,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 5: MANAGE POSTS ───
   if (activeView === 'posts') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.subHeader}>
           <Pressable onPress={() => setActiveView('menu')} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -1200,7 +1200,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 6: BRAND IDENTITY ───
   if (activeView === 'identity') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.subHeader}>
           <Pressable onPress={() => setActiveView('menu')} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -1292,7 +1292,7 @@ export default function BrandProfileScreen() {
   // ─── SCREEN 7: NOTIFICATIONS ───
   if (activeView === 'notifications') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.subHeader}>
           <Pressable onPress={() => setActiveView('menu')} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -1344,7 +1344,7 @@ export default function BrandProfileScreen() {
 
   // ─── SCREEN 8: SUPPORT ───
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.subHeader}>
         <Pressable onPress={() => setActiveView('menu')} hitSlop={8}>
           <Ionicons name="arrow-back" size={22} color="#FFFFFF" />

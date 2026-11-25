@@ -7,13 +7,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -203,7 +203,7 @@ How can I help boost your sales and promotions today?`,
   }, [messages, isTyping]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* ─── CHAT HEADER ─── */}
       <View style={styles.chatHeader}>
         <View style={styles.headerLeft}>

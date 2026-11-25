@@ -1,11 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { emitExploreTabReset, emitHomeTabReset, emitProfileTabReset } from '@/lib/tabEvents';
 import { colors, typography } from '@/theme';
 
 export default function ConsumerLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       detachInactiveScreens={false}
@@ -18,8 +21,8 @@ export default function ConsumerLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         tabBarLabelStyle: {

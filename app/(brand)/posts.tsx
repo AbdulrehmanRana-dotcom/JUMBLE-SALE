@@ -12,7 +12,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   Share,
   StyleSheet,
@@ -20,6 +19,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import * as ImagePicker from 'expo-image-picker';
 import { DealLiveTimer } from '@/components/brand/DealLiveTimer';
@@ -867,7 +867,7 @@ export default function BrandPostsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* ─── SELECTION MODE TOP BANNER ─── */}
       {selectionMode !== 'none' ? (
         <View

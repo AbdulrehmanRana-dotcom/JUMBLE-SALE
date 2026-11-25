@@ -26,7 +26,7 @@ export default function BrandRejectedScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Header
         title="Application Status"
         rightAction={
@@ -124,7 +124,7 @@ export default function BrandRejectedScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

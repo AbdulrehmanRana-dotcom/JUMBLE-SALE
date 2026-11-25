@@ -110,7 +110,7 @@ export default function SavedDealsScreen() {
 
   if (isGuest || !user) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <Header
           title="Saved Collection"
           subtitle="Bookmark deals and follow retail brands"
@@ -128,12 +128,12 @@ export default function SavedDealsScreen() {
           visible={authModalOpen}
           onClose={() => setAuthModalOpen(false)}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Header
         title="Saved & Followed"
         subtitle="Manage your bookmarked promotions and brand alerts"
@@ -280,7 +280,7 @@ export default function SavedDealsScreen() {
           )}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

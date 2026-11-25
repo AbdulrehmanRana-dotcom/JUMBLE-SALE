@@ -7,11 +7,11 @@ import {
   FlatList,
   Image,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { Badge } from '@/components/ui/Badge';

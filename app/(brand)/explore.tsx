@@ -9,13 +9,13 @@ import {
   ImageBackground,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getTopEngagedBrands, type EngagedBrand } from '@/lib/brandStore';
@@ -200,7 +200,7 @@ export default function BrandExploreScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {isLoading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color="#00FF66" />

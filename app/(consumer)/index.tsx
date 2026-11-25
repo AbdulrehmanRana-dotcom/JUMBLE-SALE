@@ -8,13 +8,13 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
@@ -483,7 +483,7 @@ export default function ConsumerHomeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header matching Screenshot 1 */}
       <View style={styles.headerBar}>
         <Text style={styles.brandTitleText}>
@@ -826,12 +826,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#090A0E',
   },
   headerBar: {
-    height: 60,
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
-    marginTop: spacing[2],
   },
   brandTitleText: {
     ...typography.h1,

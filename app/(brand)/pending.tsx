@@ -29,7 +29,7 @@ export default function BrandPendingScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Header
         title="Application Status"
         rightAction={
@@ -122,7 +122,7 @@ export default function BrandPendingScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

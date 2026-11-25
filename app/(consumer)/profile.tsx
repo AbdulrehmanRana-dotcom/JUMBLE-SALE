@@ -11,7 +11,6 @@ import {
   Image,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -19,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { DealCard } from '@/components/ui/DealCard';
@@ -483,7 +483,7 @@ export default function ConsumerProfileScreen() {
   // ─── VIEW 1: CHANGE PASSWORD SCREEN (User Screenshot 1) ───
   if (activeView === 'change-password') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {/* Top Header with Jsale Logo Badge & Profile Title */}
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
@@ -566,7 +566,7 @@ export default function ConsumerProfileScreen() {
   // ─── VIEW 2: RECENT DEALS SCREEN (Real Viewed Deals) ───
   if (activeView === 'recent-deals') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {/* Top Header */}
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
@@ -663,7 +663,7 @@ export default function ConsumerProfileScreen() {
   // ─── VIEW 3: SHOPPING HISTORY SCREEN ───
   if (activeView === 'shopping-history') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {/* Top Header */}
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
@@ -767,7 +767,7 @@ export default function ConsumerProfileScreen() {
   // ─── VIEW 4: FOLLOWING BRANDS SCREEN (Instagram style) ───
   if (activeView === 'following-brands') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {/* Top Header */}
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
@@ -876,7 +876,7 @@ export default function ConsumerProfileScreen() {
   // ─── VIEW 5: SAVED DEALS SCREEN (Instagram style) ───
   if (activeView === 'saved-deals') {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {/* Top Header */}
         <View style={styles.topHeader}>
           <View style={styles.topHeaderLeft}>
@@ -945,7 +945,7 @@ export default function ConsumerProfileScreen() {
 
   // ─── VIEW 6: MAIN PROFILE MENU ───
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {/* Top Header */}
       <View style={styles.topHeader}>
         <View style={styles.topHeaderLeft}>

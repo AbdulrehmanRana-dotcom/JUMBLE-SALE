@@ -5,12 +5,12 @@ import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { DEFAULT_CATEGORIES, getLocalCategories } from '@/lib/categoryStore';
@@ -100,7 +100,7 @@ export default function OnboardingCategoriesScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.container}>
         {/* Top Header */}
         <View style={styles.header}>

@@ -135,7 +135,7 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Header
         title="Notifications"
         subtitle={unreadCount > 0 ? `${unreadCount} unread alerts` : 'All caught up!'}
@@ -250,7 +250,7 @@ export default function NotificationsScreen() {
           }}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

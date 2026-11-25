@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   emitBrandAgentTabReset,
@@ -12,6 +13,8 @@ import {
 import { colors, typography } from '@/theme';
 
 export default function BrandLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       detachInactiveScreens={false}
@@ -24,8 +27,8 @@ export default function BrandLayout() {
         tabBarStyle: {
           backgroundColor: '#121214',
           borderTopColor: colors.border,
-          height: 64,
-          paddingBottom: 8,
+          height: 64 + insets.bottom,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,
         },
         tabBarLabelStyle: {

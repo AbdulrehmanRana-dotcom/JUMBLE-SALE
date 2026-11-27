@@ -22,7 +22,7 @@ export function Header({
   showBorder = true,
 }: HeaderProps) {
   const insets = useSafeAreaInsets();
-  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? ((StatusBar.currentHeight || 28) + 12) : 0);
 
   return (
     <View

@@ -379,24 +379,26 @@ export async function createNotification(
         let aggregatedTitle = existing.title;
         let aggregatedBody = existing.body;
 
+        const otherActor = combinedActors[1] || 'another shopper';
+
         if (payload.aggregation_key.startsWith('like_')) {
           aggregatedTitle = 'New Likes on Your Promotion! ❤️';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} liked your promotion.`;
+            aggregatedBody = `${combinedActors[0]} and ${otherActor} liked your promotion.`;
           } else {
             aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others liked your promotion.`;
           }
         } else if (payload.aggregation_key.startsWith('follow_')) {
           aggregatedTitle = 'New Followers Alert! 👤';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} started following your brand.`;
+            aggregatedBody = `${combinedActors[0]} and ${otherActor} started following your brand.`;
           } else {
             aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others started following your brand.`;
           }
         } else if (payload.aggregation_key.startsWith('comment_')) {
           aggregatedTitle = 'New Reviews on Promotion 💬';
           if (newCount === 2) {
-            aggregatedBody = `${combinedActors[0]} and ${combinedActors[1]} posted reviews.`;
+            aggregatedBody = `${combinedActors[0]} and ${otherActor} posted reviews.`;
           } else {
             aggregatedBody = `${combinedActors[0]} and ${newCount - 1} others posted reviews.`;
           }

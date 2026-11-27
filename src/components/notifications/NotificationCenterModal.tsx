@@ -48,8 +48,10 @@ export function NotificationCenterModal({
 
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const insets = useSafeAreaInsets();
-  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
-  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 16 : 8);
+  const topInset = Platform.OS === 'android'
+    ? Math.max(insets.top, (StatusBar.currentHeight || 28) + 16)
+    : Math.max(insets.top, 16);
+  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 24 : 16);
 
   // Fetch notifications for active role/user
   const {
@@ -182,6 +184,7 @@ export function NotificationCenterModal({
       visible={visible}
       animationType="slide"
       transparent={false}
+      statusBarTranslucent
       onRequestClose={onClose}>
       <View style={[styles.container, { paddingTop: topInset }]}>
         <StatusBar barStyle="light-content" backgroundColor="#090A0E" translucent />
@@ -307,7 +310,7 @@ export function NotificationCenterModal({
                     </View>
 
                     <Text style={styles.cardBody} numberOfLines={2}>
-                      {item.body}
+                      {item.body ? item.body.replace(/\band undefined\b/gi, 'and another shopper') : ''}
                     </Text>
 
                     <View style={styles.cardFooter}>

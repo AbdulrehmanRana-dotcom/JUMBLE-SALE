@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing, typography } from '@/theme';
@@ -22,12 +22,13 @@ export function Header({
   showBorder = true,
 }: HeaderProps) {
   const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
 
   return (
     <View
       style={[
         styles.container,
-        { paddingTop: insets.top + spacing[2] },
+        { paddingTop: topInset + spacing[2] },
         showBorder && styles.border,
       ]}>
       <View style={styles.row}>

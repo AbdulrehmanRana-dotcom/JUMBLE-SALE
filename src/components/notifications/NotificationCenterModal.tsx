@@ -6,12 +6,14 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
   Pressable,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -45,6 +47,9 @@ export function NotificationCenterModal({
   const queryClient = useQueryClient();
 
   const [activeFilter, setActiveFilter] = useState<string>('All');
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
+  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 16 : 8);
 
   // Fetch notifications for active role/user
   const {
@@ -178,7 +183,8 @@ export function NotificationCenterModal({
       animationType="slide"
       transparent={false}
       onRequestClose={onClose}>
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#090A0E" translucent />
         {/* Top Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -261,7 +267,7 @@ export function NotificationCenterModal({
           <FlatList
             data={filteredList}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, { paddingBottom: 60 + bottomInset }]}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
               const iconMeta = getCategoryIcon(item.category);
@@ -330,7 +336,7 @@ export function NotificationCenterModal({
             }}
           />
         )}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

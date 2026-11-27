@@ -5,13 +5,15 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Header } from '@/components/ui/Header';
@@ -33,6 +35,8 @@ export default function NotificationsScreen() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 16 : 8);
 
   const [activeTab, setActiveTab] = useState('All');
 
@@ -136,6 +140,7 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#090A0E" translucent />
       <Header
         title="Notifications"
         subtitle={unreadCount > 0 ? `${unreadCount} unread alerts` : 'All caught up!'}
@@ -190,7 +195,7 @@ export default function NotificationsScreen() {
         <FlatList
           data={filteredList}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: 60 + bottomInset }]}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}

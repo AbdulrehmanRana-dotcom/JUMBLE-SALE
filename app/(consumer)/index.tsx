@@ -426,6 +426,11 @@ export default function ConsumerHomeScreen() {
     try {
       const effectiveUserId = user?.id || 'guest';
       const commenterName = user?.email ? user.email.split('@')[0] : 'Shopper';
+      const isCurrentlyLiked = likedDealIds.includes(deal.id);
+      const currentLikes = getDealLikes(deal);
+      const optimisticCount = isCurrentlyLiked ? Math.max(0, currentLikes - 1) : Math.max(1, currentLikes + 1);
+      setDynamicLikesMap((prev) => ({ ...prev, [deal.id]: optimisticCount }));
+
       const res = await toggleDealLike(
         deal.id,
         effectiveUserId,
@@ -686,6 +691,8 @@ export default function ConsumerHomeScreen() {
                           expiresLabel={formatExpiryLabel(item.end_date)}
                           liked={likedDealIds.includes(item.id)}
                           saved={savedDealIds.includes(item.id)}
+                          likesCount={getDealLikes(item)}
+                          commentsCount={getDealComments(item)}
                           onPress={() => handleCardPress(item)}
                           onToggleLike={() => handleLikeToggle(item as any)}
                           onToggleSave={() => handleSaveToggle(item as any)}

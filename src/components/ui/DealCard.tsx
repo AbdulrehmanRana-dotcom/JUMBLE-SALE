@@ -60,7 +60,7 @@ export function DealCard({
   // Social Engagement Counts (Facebook Style)
   const baseLikes = typeof likesCount === 'number' ? likesCount : 0;
   // If current user has liked this deal, count must be at least 1
-  const displayLikes = liked && baseLikes < 1 ? 1 : baseLikes;
+  const displayLikes = liked ? Math.max(1, baseLikes) : baseLikes;
   const displayComments = typeof commentsCount === 'number' ? commentsCount : 0;
 
   // Format price if valid numbers/strings passed (zero dummy stats)
@@ -170,10 +170,10 @@ export function DealCard({
             }}
             hitSlop={6}
             style={styles.fbLikesLeft}>
-            <View style={styles.fbHeartBadge}>
-              <Ionicons name="heart" size={10} color="#FFFFFF" />
+            <View style={[styles.fbHeartBadge, displayLikes > 0 && styles.fbHeartBadgeActive]}>
+              <Ionicons name="heart" size={10} color={displayLikes > 0 ? '#FFFFFF' : '#64748B'} />
             </View>
-            <Text style={styles.fbLikesCountText}>
+            <Text style={[styles.fbLikesCountText, displayLikes > 0 && styles.fbLikesCountTextActive]}>
               {displayLikes.toLocaleString()} {displayLikes === 1 ? 'like' : 'likes'}
             </Text>
           </Pressable>
@@ -438,9 +438,12 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#FF3040',
+    backgroundColor: '#1E2230',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  fbHeartBadgeActive: {
+    backgroundColor: '#FF3040',
     shadowColor: '#FF3040',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.35,
@@ -449,8 +452,12 @@ const styles = StyleSheet.create({
   fbLikesCountText: {
     ...typography.caption,
     fontSize: 12,
+    fontWeight: '500',
+    color: '#64748B',
+  },
+  fbLikesCountTextActive: {
+    color: '#E2E8F0',
     fontWeight: '600',
-    color: '#94A3B8',
   },
   fbCommentsCountText: {
     ...typography.caption,

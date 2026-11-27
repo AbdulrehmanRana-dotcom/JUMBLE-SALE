@@ -1,3 +1,4 @@
+import * as Updates from 'expo-updates';
 import {
   PlusJakartaSans_400Regular,
   PlusJakartaSans_500Medium,
@@ -160,6 +161,23 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded) SplashScreen.hideAsync();
   }, [loaded]);
+
+  useEffect(() => {
+    async function onCheckUpdates() {
+      try {
+        if (!__DEV__) {
+          const update = await Updates.checkForUpdateAsync();
+          if (update.isAvailable) {
+            await Updates.fetchUpdateAsync();
+            await Updates.reloadAsync();
+          }
+        }
+      } catch {
+        // Silently ignore offline / network errors
+      }
+    }
+    onCheckUpdates();
+  }, []);
 
   if (!loaded) {
     return null;

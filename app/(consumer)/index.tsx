@@ -447,6 +447,11 @@ export default function ConsumerHomeScreen() {
         toast.show('Removed like', 'info');
       }
       refetchLikedIds();
+      queryClient.invalidateQueries({ queryKey: ['user-likes'] });
+      queryClient.invalidateQueries({ queryKey: ['deal-likes-count', deal.id] });
+      queryClient.invalidateQueries({ queryKey: ['deal-detail', deal.id] });
+      queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+      queryClient.invalidateQueries({ queryKey: ['deals-batch-interactions'] });
     } catch {
       toast.show('Could not update like', 'error');
     }

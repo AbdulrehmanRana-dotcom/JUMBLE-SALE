@@ -149,11 +149,19 @@ export default function DealDetailScreen() {
     enabled: Boolean(id),
   });
 
+  // Real user likes query from Supabase + local store (shared with Home feed)
+  const { data: likedDealIds = [], refetch: refetchLikedDealIds } = useQuery<string[]>({
+    queryKey: ['user-likes', user?.id || 'guest'],
+    queryFn: () => getLikedDealIds(user?.id || 'guest'),
+    staleTime: 0,
+  });
+
   // Real Likes Count Query (Starts at 0, reflects database count)
   const { data: likesCount = 0, refetch: refetchLikesCount } = useQuery<number>({
     queryKey: ['deal-likes-count', id],
     queryFn: () => getDealLikesCount(id || ''),
     enabled: Boolean(id),
+    staleTime: 0,
   });
 
   // Real Comments Query
@@ -161,7 +169,12 @@ export default function DealDetailScreen() {
     queryKey: ['deal-comments', id],
     queryFn: () => getDealComments(id || ''),
     enabled: Boolean(id),
+    staleTime: 0,
   });
+
+  const isLikedByUser = Boolean(deal?.is_liked || (id && likedDealIds.includes(id)));
+  const baseLikes = typeof likesCount === 'number' ? likesCount : 0;
+  const displayLikes = isLikedByUser ? Math.max(1, baseLikes) : baseLikes;
 
   const handleToggleLike = async () => {
     if (!deal) return;
@@ -185,6 +198,12 @@ export default function DealDetailScreen() {
       }
       refetch();
       refetchLikesCount();
+      refetchLikedDealIds();
+      queryClient.invalidateQueries({ queryKey: ['user-likes'] });
+      queryClient.invalidateQueries({ queryKey: ['deal-likes-count', deal.id] });
+      queryClient.invalidateQueries({ queryKey: ['deal-detail', deal.id] });
+      queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+      queryClient.invalidateQueries({ queryKey: ['deals-batch-interactions'] });
     } catch (err: any) {
       toast.show(err.message || 'Action failed', 'error');
     }
@@ -278,6 +297,9 @@ export default function DealDetailScreen() {
       setCommentText('');
       toast.show('Review posted successfully! 💬', 'success');
       refetchComments();
+      queryClient.invalidateQueries({ queryKey: ['deal-comments', deal.id] });
+      queryClient.invalidateQueries({ queryKey: ['deals-feed'] });
+      queryClient.invalidateQueries({ queryKey: ['deals-batch-interactions'] });
     } catch (err: any) {
       toast.show(err.message || 'Failed to submit review', 'error');
     } finally {
@@ -553,17 +575,17 @@ export default function DealDetailScreen() {
         {/* Engagement Row: Real Likes Count & Real Comments Count */}
         <View style={styles.engagementBar}>
           <Pressable
-            style={[styles.engagementBtn, deal.is_liked && styles.engagementBtnLiked]}
+            style={[styles.engagementBtn, isLikedByUser && styles.engagementBtnLiked]}
             onPress={handleToggleLike}
             accessibilityRole="button"
             accessibilityLabel="Like deal">
             <Ionicons
-              name={deal.is_liked ? 'heart' : 'heart-outline'}
+              name={isLikedByUser ? 'heart' : 'heart-outline'}
               size={20}
-              color={deal.is_liked ? '#FF4500' : '#FFFFFF'}
+              color={isLikedByUser ? '#FF4500' : '#FFFFFF'}
             />
-            <Text style={[styles.engagementBtnText, deal.is_liked && styles.engagementBtnTextLiked]}>
-              {(deal.is_liked && likesCount < 1 ? 1 : likesCount)} {(deal.is_liked && likesCount < 1 ? 1 : likesCount) === 1 ? 'Like' : 'Likes'}
+            <Text style={[styles.engagementBtnText, isLikedByUser && styles.engagementBtnTextLiked]}>
+              {displayLikes} {displayLikes === 1 ? 'Like' : 'Likes'}
             </Text>
           </Pressable>
 

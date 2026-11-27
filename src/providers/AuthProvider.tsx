@@ -317,6 +317,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       '@jumble_sale_active_auth',
       JSON.stringify({ user: userObj, profile: profileObj, brand: null })
     ).catch(() => {});
+
+    if (adminId) {
+      (supabase.from('profiles') as any).upsert({
+        id: adminId,
+        email: 'admin@jumblesale.com',
+        display_name: 'System Admin',
+        role: 'admin',
+        is_active: true,
+      }, { onConflict: 'id' }).then(() => {}).catch(() => {});
+    }
   };
 
   const bypassAsBrand = (
@@ -444,6 +454,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       '@jumble_sale_active_auth',
       JSON.stringify({ user: userObj, profile: profileObj, brand: null })
     ).catch(() => {});
+
+    if (userId) {
+      (supabase.from('profiles') as any).upsert({
+        id: userId,
+        email: userEmail,
+        display_name: userName,
+        role: 'consumer',
+        is_active: true,
+      }, { onConflict: 'id' }).then(() => {}).catch(() => {});
+    }
   };
 
   useEffect(() => {

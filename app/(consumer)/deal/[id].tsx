@@ -11,12 +11,13 @@ import {
   Pressable,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
@@ -53,6 +54,9 @@ export default function DealDetailScreen() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user, profile } = useAuth();
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
+  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 16 : 8);
   const [storedDisplayName, setStoredDisplayName] = useState<string | null>(null);
 
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -312,7 +316,7 @@ export default function DealDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
@@ -323,13 +327,13 @@ export default function DealDetailScreen() {
         <View style={styles.loadingCenter}>
           <ActivityIndicator size="large" color="#00FF66" />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!deal) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
@@ -340,7 +344,7 @@ export default function DealDetailScreen() {
         <View style={styles.loadingCenter}>
           <Text style={styles.errorText}>Deal not found or has expired.</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -369,7 +373,8 @@ export default function DealDetailScreen() {
   const daysLeft = getDealRemainingDays(deal);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topInset }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#090A0E" translucent />
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8} accessibilityLabel="Back">
@@ -385,7 +390,7 @@ export default function DealDetailScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 110 + bottomInset }]}>
         {/* Deal Expired Banner */}
         {isEnded && (
           <View style={styles.expiredBanner}>
@@ -776,7 +781,7 @@ export default function DealDetailScreen() {
       </ScrollView>
 
       {/* Fixed Bottom Action Bar */}
-      <View style={styles.bottomBar}>
+      <View style={[styles.bottomBar, { paddingBottom: Math.max(bottomInset, 16) }]}>
         {/* Save Deal Button */}
         <Pressable
           style={[styles.saveBtn, deal.is_saved && styles.saveBtnActive]}
@@ -864,7 +869,7 @@ export default function DealDetailScreen() {
           onRequestClose={() => setFullscreenImageIndex(null)}>
           <View style={styles.lightboxBackdrop}>
             {/* Top Bar with Close & Counter */}
-            <SafeAreaView style={styles.lightboxTopBar}>
+            <View style={[styles.lightboxTopBar, { paddingTop: topInset + 10 }]}>
               <View style={styles.lightboxCounter}>
                 <Text style={styles.lightboxCounterText}>
                   {selectedImageIndex + 1} / {dealImages.length}
@@ -876,7 +881,7 @@ export default function DealDetailScreen() {
                 hitSlop={12}>
                 <Ionicons name="close" size={24} color="#FFFFFF" />
               </Pressable>
-            </SafeAreaView>
+            </View>
 
             {/* Centered High-Res Image */}
             <View style={styles.lightboxImageWrap}>
@@ -911,7 +916,7 @@ export default function DealDetailScreen() {
           </View>
         </Modal>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

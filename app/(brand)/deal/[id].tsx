@@ -8,14 +8,15 @@ import {
   Linking,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -38,6 +39,9 @@ export default function BrandDealDetailScreen() {
   const router = useRouter();
   const toast = useToast();
   const { user, brand: authBrand, profile } = useAuth();
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
+  const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'android' ? 16 : 8);
 
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
@@ -154,7 +158,7 @@ export default function BrandDealDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -165,13 +169,13 @@ export default function BrandDealDetailScreen() {
         <View style={styles.loadingCenter}>
           <ActivityIndicator size="large" color="#00FF66" />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!deal) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={[styles.container, { paddingTop: topInset }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -182,7 +186,7 @@ export default function BrandDealDetailScreen() {
         <View style={styles.loadingCenter}>
           <Text style={styles.errorText}>Deal not found or has expired.</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -205,7 +209,8 @@ export default function BrandDealDetailScreen() {
   const brandDisplayName = (deal as any).brand?.name || authBrand?.name || profile?.display_name || 'Brand Partner';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={[styles.container, { paddingTop: topInset }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#090A0E" translucent />
       {/* ─── 1. TOP HEADER ─── */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8}>
@@ -237,7 +242,7 @@ export default function BrandDealDetailScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 110 + bottomInset }]} showsVerticalScrollIndicator={false}>
         {/* ─── 2. COVER IMAGE BANNER ─── */}
         <View style={styles.imageWrap}>
           <Image source={{ uri: imageUri }} style={styles.dealImage} resizeMode="cover" />
@@ -442,7 +447,7 @@ export default function BrandDealDetailScreen() {
 
       {/* ─── 10. FIXED BOTTOM ACTION BAR ─── */}
       {Boolean(fromPosts === '1') && (
-        <View style={styles.bottomBar}>
+        <View style={[styles.bottomBar, { height: 60 + bottomInset, paddingBottom: Math.max(bottomInset, 12) }]}>
           <Pressable
             style={styles.bottomEditBtn}
             onPress={() =>
@@ -456,7 +461,7 @@ export default function BrandDealDetailScreen() {
           </Pressable>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

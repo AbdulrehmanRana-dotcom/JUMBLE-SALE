@@ -236,28 +236,28 @@ export default function BrandProfileScreen() {
 
   if (loadingBrand) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <Header title="Brand Profile" onBack={() => router.back()} />
         <View style={styles.loadingCenter}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!brand) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <Header title="Brand Profile" onBack={() => router.back()} />
         <View style={styles.loadingCenter}>
           <Text style={styles.errorText}>Brand profile not found.</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Header title={brand.name} onBack={() => router.back()} />
 
       <FlatList
@@ -351,7 +351,7 @@ export default function BrandProfileScreen() {
         visible={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -137,10 +137,20 @@ export default function ConsumerHomeScreen() {
   }, []);
 
   const getDealLikes = (deal: Deal | any) => {
-    if (typeof dynamicLikesMap[deal.id] === 'number') return dynamicLikesMap[deal.id];
-    if (batchInteractions?.[deal.id]?.likes_count !== undefined) return batchInteractions[deal.id].likes_count;
-    if (typeof deal.likes_count === 'number') return deal.likes_count;
-    return 0;
+    const isUserLiked = likedDealIds.includes(deal.id);
+    let count = 0;
+    if (typeof dynamicLikesMap[deal.id] === 'number') {
+      count = dynamicLikesMap[deal.id];
+    } else if (batchInteractions?.[deal.id]?.likes_count !== undefined) {
+      count = batchInteractions[deal.id].likes_count;
+    } else if (typeof deal.likes_count === 'number') {
+      count = deal.likes_count;
+    }
+    // If current user has liked this deal, count must be at least 1
+    if (isUserLiked && count < 1) {
+      count = 1;
+    }
+    return count;
   };
 
   const getDealComments = (deal: Deal | any) => {

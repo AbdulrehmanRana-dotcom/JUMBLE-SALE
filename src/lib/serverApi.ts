@@ -1,4 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const SERVER_URL =
   process.env.EXPO_PUBLIC_SERVER_URL ||
@@ -87,6 +89,44 @@ export async function callServerGetInteractions(
         };
       }
     }
+  } catch {}
+
+  // Fallback: Query Supabase & AsyncStorage directly when Node.js server is unreachable
+  try {
+    let likesCount = 0;
+    let commentsCount = 0;
+    let isLiked = false;
+
+    if (isSupabaseConfigured) {
+      const [likesRes, commentsRes] = await Promise.all([
+        (supabase.from('likes') as any).select('*', { count: 'exact', head: true }).eq('deal_id', dealId),
+        (supabase.from('comments') as any).select('*', { count: 'exact', head: true }).eq('deal_id', dealId),
+      ]);
+      if (typeof likesRes.count === 'number') likesCount = likesRes.count;
+      if (typeof commentsRes.count === 'number') commentsCount = commentsRes.count;
+
+      if (userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+        const { data: userLike } = await (supabase.from('likes') as any)
+          .select('id')
+          .eq('deal_id', dealId)
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (userLike) isLiked = true;
+      }
+    }
+
+    // Check local storage for current user like
+    const safeUid = userId || 'guest';
+    const rawLiked = await AsyncStorage.getItem(`@jumble_sale_likes_${safeUid}`);
+    if (rawLiked) {
+      const list = JSON.parse(rawLiked);
+      if (Array.isArray(list) && list.includes(dealId)) {
+        isLiked = true;
+        likesCount = Math.max(likesCount, 1);
+      }
+    }
+
+    return { likes_count: likesCount, comments_count: commentsCount, is_liked: isLiked };
   } catch {}
 
   return null;
@@ -275,6 +315,52 @@ export async function callServerGetBatchInteractions(): Promise<Record<string, {
         return data.interactions;
       }
     }
+  } catch {}
+
+  // Fallback: Aggregate interaction counts directly from Supabase & AsyncStorage
+  try {
+    const fallback: Record<string, { likes_count: number; comments_count: number }> = {};
+    if (isSupabaseConfigured) {
+      const [likesRes, commentsRes] = await Promise.all([
+        (supabase.from('likes') as any).select('deal_id'),
+        (supabase.from('comments') as any).select('deal_id'),
+      ]);
+
+      if (Array.isArray(likesRes.data)) {
+        for (const row of likesRes.data) {
+          if (!row.deal_id) continue;
+          if (!fallback[row.deal_id]) fallback[row.deal_id] = { likes_count: 0, comments_count: 0 };
+          fallback[row.deal_id].likes_count++;
+        }
+      }
+      if (Array.isArray(commentsRes.data)) {
+        for (const row of commentsRes.data) {
+          if (!row.deal_id) continue;
+          if (!fallback[row.deal_id]) fallback[row.deal_id] = { likes_count: 0, comments_count: 0 };
+          fallback[row.deal_id].comments_count++;
+        }
+      }
+    }
+
+    // Merge locally cached liked deals from all local users
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const likeKeys = allKeys.filter((k) => k.startsWith('@jumble_sale_likes'));
+      for (const k of likeKeys) {
+        const raw = await AsyncStorage.getItem(k);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            for (const dealId of list) {
+              if (!fallback[dealId]) fallback[dealId] = { likes_count: 0, comments_count: 0 };
+              fallback[dealId].likes_count = Math.max(fallback[dealId].likes_count, 1);
+            }
+          }
+        }
+      }
+    } catch {}
+
+    return Object.keys(fallback).length > 0 ? fallback : null;
   } catch {}
 
   return null;

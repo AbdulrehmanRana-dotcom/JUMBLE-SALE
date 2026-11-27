@@ -558,7 +558,7 @@ export default function DealDetailScreen() {
               color={deal.is_liked ? '#FF4500' : '#FFFFFF'}
             />
             <Text style={[styles.engagementBtnText, deal.is_liked && styles.engagementBtnTextLiked]}>
-              {likesCount} {likesCount === 1 ? 'Like' : 'Likes'}
+              {(deal.is_liked && likesCount < 1 ? 1 : likesCount)} {(deal.is_liked && likesCount < 1 ? 1 : likesCount) === 1 ? 'Like' : 'Likes'}
             </Text>
           </Pressable>
 

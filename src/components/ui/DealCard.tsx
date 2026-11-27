@@ -58,7 +58,9 @@ export function DealCard({
   const displayTitle = (title || '').replace(/\s*\((?:copy|nakal)\)/gi, '').trim();
 
   // Social Engagement Counts (Facebook Style)
-  const displayLikes = typeof likesCount === 'number' ? likesCount : 0;
+  const baseLikes = typeof likesCount === 'number' ? likesCount : 0;
+  // If current user has liked this deal, count must be at least 1
+  const displayLikes = liked && baseLikes < 1 ? 1 : baseLikes;
   const displayComments = typeof commentsCount === 'number' ? commentsCount : 0;
 
   // Format price if valid numbers/strings passed (zero dummy stats)

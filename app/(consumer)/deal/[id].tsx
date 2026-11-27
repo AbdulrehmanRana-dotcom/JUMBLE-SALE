@@ -49,7 +49,8 @@ import type { Deal } from '@/types/database.types';
 import { colors, spacing, typography } from '@/theme';
 
 export default function DealDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string }>();
+  const id = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? (params.id[0] as string) : '';
   const router = useRouter();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -87,6 +88,8 @@ export default function DealDetailScreen() {
     refetch,
   } = useQuery<Deal & { is_liked?: boolean; is_saved?: boolean; website_url?: string }>({
     queryKey: ['deal-detail', id, user?.id],
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => {
       if (!id) throw new Error('Missing deal ID');
 
@@ -171,6 +174,15 @@ export default function DealDetailScreen() {
     enabled: Boolean(id),
     staleTime: 0,
   });
+
+  React.useEffect(() => {
+    if (id) {
+      refetch();
+      refetchLikesCount();
+      refetchComments();
+      refetchLikedDealIds();
+    }
+  }, [id]);
 
   const isLikedByUser = Boolean(deal?.is_liked || (id && likedDealIds.includes(id)));
   const baseLikes = typeof likesCount === 'number' ? likesCount : 0;

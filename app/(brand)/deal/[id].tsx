@@ -24,6 +24,7 @@ import {
   addDealComment,
   getDealComments,
   getDealLikesCount,
+  getLikedDealIds,
   sanitizeReviewerName,
   type CommentItem,
 } from '@/lib/activityStore';
@@ -35,7 +36,9 @@ import { radii, spacing, typography } from '@/theme';
 import type { Deal } from '@/types/database.types';
 
 export default function BrandDealDetailScreen() {
-  const { id, fromPosts } = useLocalSearchParams<{ id: string; fromPosts?: string }>();
+  const params = useLocalSearchParams<{ id: string; fromPosts?: string }>();
+  const id = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? (params.id[0] as string) : '';
+  const fromPosts = params.fromPosts;
   const router = useRouter();
   const toast = useToast();
   const { user, brand: authBrand, profile } = useAuth();
@@ -110,7 +113,21 @@ export default function BrandDealDetailScreen() {
     queryKey: ['brand-deal-likes-count', id],
     queryFn: () => getDealLikesCount(id || ''),
     enabled: Boolean(id),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
+
+  // User Likes Query synced with app
+  const { data: likedDealIds = [] } = useQuery<string[]>({
+    queryKey: ['user-likes', user?.id || 'guest'],
+    queryFn: () => getLikedDealIds(user?.id || 'guest'),
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
+
+  const isLikedByUser = Boolean((deal as any)?.is_liked || (id && likedDealIds.includes(id)));
+  const baseLikes = typeof likesCount === 'number' ? likesCount : 0;
+  const displayLikes = isLikedByUser ? Math.max(1, baseLikes) : baseLikes;
 
   const handleShare = async () => {
     if (!deal) return;
@@ -294,9 +311,9 @@ export default function BrandDealDetailScreen() {
         {/* ─── LIVE ENGAGEMENT SUMMARY (Facebook Style) ─── */}
         <View style={styles.engagementBar}>
           <View style={styles.engagementStat}>
-            <Ionicons name={likesCount > 0 ? 'heart' : 'heart-outline'} size={18} color="#FF3B30" />
+            <Ionicons name={displayLikes > 0 ? 'heart' : 'heart-outline'} size={18} color="#FF3B30" />
             <Text style={styles.engagementText}>
-              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{likesCount}</Text> {likesCount === 1 ? 'like' : 'likes'}
+              <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{displayLikes}</Text> {displayLikes === 1 ? 'like' : 'likes'}
             </Text>
           </View>
           <View style={styles.engagementStat}>

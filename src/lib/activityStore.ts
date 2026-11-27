@@ -445,10 +445,16 @@ export async function toggleDealLike(
       }
     }
 
+    const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
+    const rawPrev = await AsyncStorage.getItem(countKey);
+    let currentCount = rawPrev ? parseInt(rawPrev, 10) || 0 : 0;
+    const computedCount = isNowLiked ? Math.max(1, currentCount + 1) : Math.max(0, currentCount - 1);
+    await AsyncStorage.setItem(countKey, computedCount.toString());
     await AsyncStorage.setItem(userKey, JSON.stringify(updated));
     const newCount = await getDealLikesCount(dealId);
+    const finalCount = isNowLiked ? Math.max(1, newCount, computedCount) : Math.max(0, newCount);
 
-    return { isLiked: isNowLiked, count: newCount };
+    return { isLiked: isNowLiked, count: finalCount };
   } catch (err) {
     console.error('[ActivityStore] Toggle like error:', err);
     return { isLiked: false, count: 0 };
@@ -653,32 +659,43 @@ export async function getSavedDealsList(userId?: string | null): Promise<Deal[]>
 }
 
 export async function getDealLikesCount(dealId: string): Promise<number> {
-  // 1. Try Node.js Backend Server API first (Authentic live count)
+  const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
+  let baseCount = 0;
+
+  // 1. Direct fast check of stored deal likes count
   try {
-    const serverInteractions = await callServerGetInteractions(dealId);
-    if (serverInteractions && typeof serverInteractions.likes_count === 'number') {
-      return serverInteractions.likes_count;
+    const rawStored = await AsyncStorage.getItem(countKey);
+    if (rawStored) {
+      const parsed = parseInt(rawStored, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        baseCount = parsed;
+      }
     }
   } catch {}
 
-  const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
-  let baseCount = 0;
+  // 2. Try Node.js Backend Server API
+  try {
+    const serverInteractions = await callServerGetInteractions(dealId);
+    if (serverInteractions && typeof serverInteractions.likes_count === 'number') {
+      baseCount = Math.max(baseCount, serverInteractions.likes_count);
+    }
+  } catch {}
 
+  // 3. Query Supabase
+  const isDealUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dealId);
   if (isDealUUID && isSupabaseConfigured) {
     try {
       const { count, error } = await (supabase.from('likes') as any)
         .select('*', { count: 'exact', head: true })
         .eq('deal_id', dealId);
 
-      if (!error && typeof count === 'number') {
-        baseCount = count;
+      if (!error && typeof count === 'number' && count > 0) {
+        baseCount = Math.max(baseCount, count);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
-  // Count distinct users who actually have this dealId in their liked list
+  // 4. Count across all local user keys
   try {
     const allKeys = await AsyncStorage.getAllKeys();
     const likeKeys = allKeys.filter((k) => k.startsWith(LIKES_STORAGE_KEY));
@@ -693,18 +710,13 @@ export async function getDealLikesCount(dealId: string): Promise<number> {
             distinctUsersCount++;
           }
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     const finalCount = Math.max(baseCount, distinctUsersCount);
-    const countKey = `${DEAL_LIKES_COUNT_KEY}_${dealId}`;
     await AsyncStorage.setItem(countKey, finalCount.toString());
     return finalCount;
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   return baseCount;
 }
